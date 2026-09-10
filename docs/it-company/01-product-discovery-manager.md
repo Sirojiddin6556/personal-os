@@ -11,7 +11,7 @@ TASK: Провести Product Discovery для Personal OS — умного е�
 - **ML/CV блок (13–15)**: SKIPPED — SKIPPED_REASON: продукт не содержит собственных ML/CV моделей; AI используется через внешний LLM API, не требует отдельного ML Serving слоя
 - **Data Visualization Engineer (20a)**: REQUIRED — продукт содержит Dashboard (Today, Finance, Analytics, Activity), нужны графики и чарты
 - **Accessibility Auditor (26a)**: REQUIRED — публичный продукт с широкой аудиторией
-- **SRE (31)**: SKIPPED — SKIPPED_REASON: MVP, нет production-нагрузки; добавить после первого production-релиза
+- **SRE (31)**: REQUIRED — мониторинг, алертинг, SLO, runbooks, incident response
 
 ---
 
@@ -104,3 +104,4 @@ TASK: Провести Product Discovery для Personal OS — умного е�
 - docs/it-company/01-product-discovery-manager.md
 
 ## NEXT_AGENT: 02-business-analyst
+
