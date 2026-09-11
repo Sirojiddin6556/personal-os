@@ -50,5 +50,7 @@ export interface ParsedQuickAdd {
   currency?: string;
   account?: string;
   category?: string;
+  time?: string;
   confidence: number;
 }
+

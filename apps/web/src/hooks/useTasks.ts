@@ -441,3 +441,207 @@ export function useMoveTask() {
     },
   });
 }
+
+/**
+ * Composite hook for tasks list with filtering and optimistic mutations.
+ */
+const DEFAULT_INITIAL_TASKS: Task[] = [
+  {
+    id: 'task-1',
+    title: 'Подготовить отчёт по квартальной выручке',
+    description_markdown: 'Собрать данные из CRM и 1C, свести P&L в единый дашборд',
+    status: TaskStatus.INBOX,
+    priority: Priority.P2,
+    due_at: new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
+    project: { id: 'p-work', name: 'work', color: '#6366f1' },
+    subtasks: [
+      { id: 'sub-1', title: 'Экспорт из 1С', is_completed: true, sort_order: 1 },
+      { id: 'sub-2', title: 'Сверка с банковскими выписками', is_completed: true, sort_order: 2 },
+      { id: 'sub-3', title: 'Сборка P&L', is_completed: false, sort_order: 3 },
+      { id: 'sub-4', title: 'Ревью финансового директора', is_completed: false, sort_order: 4 },
+    ],
+    sort_order: 1,
+    tags: ['finance', 'quarterly'],
+    version: 1,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 'task-2',
+    title: 'Запустить миграцию базы данных PostgreSQL 16',
+    description_markdown: 'Проверить RLS политики и индексы полнотекстового поиска',
+    status: TaskStatus.TODO,
+    priority: Priority.P1,
+    due_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+    project: { id: 'p-infra', name: 'infra', color: '#ef4444' },
+    subtasks: [
+      { id: 'sub-5', title: 'Создать резервную копию pg_dump', is_completed: true, sort_order: 1 },
+      { id: 'sub-6', title: 'Применить миграцию Alembic', is_completed: false, sort_order: 2 },
+    ],
+    sort_order: 1,
+    tags: ['devops', 'db'],
+    version: 1,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 'task-3',
+    title: 'Забронировать билеты на конференцию HighLoad++',
+    description_markdown: 'Выбрать перелёт и гостиницу рядом с кластером Сколково',
+    status: TaskStatus.SCHEDULED,
+    priority: Priority.P3,
+    due_at: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+    project: { id: 'p-personal', name: 'personal', color: '#10b981' },
+    subtasks: [],
+    sort_order: 1,
+    tags: ['travel', 'edu'],
+    version: 1,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 'task-4',
+    title: 'Ревью архитектуры UI компонентов (PR #42)',
+    description_markdown: 'Проверить ARIA роли, фокус-ринги и соответствие дизайн-токенам',
+    status: TaskStatus.IN_PROGRESS,
+    priority: Priority.P2,
+    due_at: new Date(Date.now() + 6 * 3600 * 1000).toISOString(),
+    project: { id: 'p-frontend', name: 'frontend', color: '#0ea5e9' },
+    subtasks: [
+      { id: 'sub-7', title: 'Проверка доступности axe-core', is_completed: true, sort_order: 1 },
+      { id: 'sub-8', title: 'Проверка темной темы', is_completed: false, sort_order: 2 },
+    ],
+    sort_order: 1,
+    tags: ['code-review', 'a11y'],
+    version: 1,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 'task-5',
+    title: 'Ждать согласование бюджета от финотдела',
+    description_markdown: 'Ожидается подтверждение счета на лицензии LLM',
+    status: TaskStatus.WAITING,
+    priority: Priority.P4,
+    due_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
+    project: { id: 'p-work', name: 'work', color: '#6366f1' },
+    subtasks: [],
+    sort_order: 1,
+    tags: ['finance', 'external'],
+    version: 1,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+  {
+    id: 'task-6',
+    title: 'Настройка Telegram Bot Webhook для Personal OS',
+    description_markdown: 'Интеграция бота для быстрого ввода задач через голосовые сообщения',
+    status: TaskStatus.DONE,
+    priority: Priority.P3,
+    due_at: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
+    project: { id: 'p-bot', name: 'integration', color: '#8b5cf6' },
+    subtasks: [{ id: 'sub-9', title: 'TLS сертификат и эндпоинт', is_completed: true, sort_order: 1 }],
+    sort_order: 1,
+    tags: ['telegram', 'api'],
+    version: 1,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  },
+];
+
+export function useTasks(filters?: {
+  status?: string;
+  priority?: string;
+  project?: string;
+  search?: string;
+}) {
+  const [tasks, setTasks] = React.useState<Task[]>(DEFAULT_INITIAL_TASKS);
+  const moveTaskMutation = useMoveTask();
+  const completeTaskMutation = useCompleteTask();
+
+  const filteredTasks = React.useMemo(() => {
+    return tasks.filter((task) => {
+      if (filters?.status && filters.status !== 'all' && task.status !== filters.status) return false;
+      if (filters?.priority && filters.priority !== 'all' && task.priority !== filters.priority) return false;
+      if (filters?.project && filters.project !== 'all' && task.project?.name !== filters.project) return false;
+      if (filters?.search) {
+        const q = filters.search.toLowerCase();
+        return (
+          task.title.toLowerCase().includes(q) ||
+          (task.description_markdown && task.description_markdown.toLowerCase().includes(q))
+        );
+      }
+      return true;
+    });
+  }, [tasks, filters]);
+
+  const moveTask = React.useCallback(
+    (taskId: string, targetStatus: TaskStatus | TaskStatusType, newIndex?: number) => {
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === taskId
+            ? {
+                ...t,
+                status: targetStatus as TaskStatus,
+                sort_order: newIndex !== undefined ? newIndex : t.sort_order,
+                updated_at: new Date().toISOString(),
+              }
+            : t
+        )
+      );
+      // Background optimistic mutation
+      moveTaskMutation.mutate({
+        id: taskId,
+        version: 1,
+        status: targetStatus as TaskStatus,
+        sort_order: newIndex,
+      });
+    },
+    [moveTaskMutation]
+  );
+
+  const completeTask = React.useCallback(
+    (taskId: string) => {
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === taskId
+            ? {
+                ...t,
+                status: t.status === TaskStatus.DONE ? TaskStatus.TODO : TaskStatus.DONE,
+                completed_at: t.status === TaskStatus.DONE ? null : new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              }
+            : t
+        )
+      );
+      completeTaskMutation.mutate({ id: taskId, version: 1 });
+    },
+    [completeTaskMutation]
+  );
+
+  return {
+    tasks: filteredTasks,
+    allTasks: tasks,
+    moveTask,
+    completeTask,
+  };
+}
+
+export function useTaskMutations() {
+  const moveTaskMutation = useMoveTask();
+  const completeTaskMutation = useCompleteTask();
+
+  return {
+    moveTaskOptimistic: (params: { taskId: string; targetColumnOrTaskId: string }) => {
+      moveTaskMutation.mutate({
+        id: params.taskId,
+        version: 1,
+        status: params.targetColumnOrTaskId as TaskStatus,
+      });
+    },
+    completeTask: (taskId: string) => {
+      completeTaskMutation.mutate({ id: taskId, version: 1 });
+    },
+  };
+}
+
