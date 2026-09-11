@@ -152,31 +152,35 @@ export function TodayDashboard() {
 
             {/* Timeline items */}
             <div className="space-y-2.5">
-              {agenda.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-center justify-between p-3 rounded-xl bg-surface-muted/60 hover:bg-surface-muted border border-border transition-colors duration-fast"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-bold font-mono text-primary px-2 py-1 bg-primary/10 rounded-md">
-                      {item.start} — {item.end}
-                    </span>
-                    <div>
-                      <p className="text-sm font-semibold text-text-primary">{item.title}</p>
-                      {item.is_external && (
-                        <span className="text-[10px] text-text-muted">
-                          Синхронизировано с Google Calendar
-                        </span>
-                      )}
+              {agenda.map((item) => {
+                const startTime = item.start || item.start_time || '';
+                const endTime = item.end || item.end_time || '';
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between p-3 rounded-xl bg-surface-muted/60 hover:bg-surface-muted border border-border transition-colors duration-fast"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-bold font-mono text-primary px-2 py-1 bg-primary/10 rounded-md">
+                        {startTime} — {endTime}
+                      </span>
+                      <div>
+                        <p className="text-sm font-semibold text-text-primary">{item.title}</p>
+                        {item.is_external && (
+                          <span className="text-[10px] text-text-muted">
+                            Синхронизировано с Google Calendar
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
 
-                  <span
-                    className="w-2.5 h-2.5 rounded-full shrink-0"
-                    style={{ backgroundColor: item.color || '#0ea5e9' }}
-                  />
-                </div>
-              ))}
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ backgroundColor: item.color || '#0ea5e9' }}
+                    />
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -195,54 +199,65 @@ export function TodayDashboard() {
       {/* 4. Row 3: Budget Summary Bar & Habits Quick Check */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Budget Summary Bar (2 columns on lg) */}
-        <section
-          aria-labelledby="budget-summary-heading"
-          className="lg:col-span-2 bg-surface border border-border rounded-2xl p-5 shadow-xs"
-        >
-          <div className="flex items-center justify-between mb-3">
-            <h3 id="budget-summary-heading" className="text-base font-bold text-text-primary">
-              Бюджет на текущий месяц
-            </h3>
-            <a href="/finance" className="text-xs font-semibold text-primary hover:underline">
-              Финансы →
-            </a>
-          </div>
+        {(() => {
+          const spent = budgetSummary.spent ?? Math.round(budgetSummary.monthly_spent_minor / 100);
+          const limit = budgetSummary.limit ?? Math.round(budgetSummary.monthly_limit_minor / 100);
+          const percentage =
+            budgetSummary.percentage ?? (limit > 0 ? Math.round((spent / limit) * 100) : 0);
+          const remaining = budgetSummary.remaining ?? Math.max(0, limit - spent);
 
-          <div className="flex items-center justify-between text-xs mb-1.5">
-            <span className="font-semibold text-text-secondary">
-              Израсходовано {budgetSummary.percentage}%
-            </span>
-            <span className="font-mono text-text-primary font-bold">
-              {budgetSummary.spent.toLocaleString('ru-RU')} / {budgetSummary.limit.toLocaleString('ru-RU')} ₽
-            </span>
-          </div>
+          return (
+            <section
+              aria-labelledby="budget-summary-heading"
+              className="lg:col-span-2 bg-surface border border-border rounded-2xl p-5 shadow-xs"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <h3 id="budget-summary-heading" className="text-base font-bold text-text-primary">
+                  Бюджет на текущий месяц
+                </h3>
+                <a href="/finance" className="text-xs font-semibold text-primary hover:underline">
+                  Финансы →
+                </a>
+              </div>
 
-          {/* Progress track */}
-          <div className="w-full h-3 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-            <div
-              role="progressbar"
-              aria-valuenow={budgetSummary.percentage}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              className={cn(
-                'h-full rounded-full transition-all duration-300',
-                budgetSummary.percentage > 90
-                  ? 'bg-rose-500'
-                  : budgetSummary.percentage > 70
-                  ? 'bg-amber-500'
-                  : 'bg-emerald-500'
-              )}
-              style={{ width: `${Math.min(budgetSummary.percentage, 100)}%` }}
-            />
-          </div>
+              <div className="flex items-center justify-between text-xs mb-1.5">
+                <span className="font-semibold text-text-secondary">
+                  Израсходовано {percentage}%
+                </span>
+                <span className="font-mono text-text-primary font-bold">
+                  {spent.toLocaleString('ru-RU')} / {limit.toLocaleString('ru-RU')} ₽
+                </span>
+              </div>
 
-          <div className="flex items-center justify-between mt-2 text-xs">
-            <span className="text-text-muted">
-              Остаток лимита: <strong className="text-emerald-600 font-mono">{budgetSummary.remaining.toLocaleString('ru-RU')} ₽</strong>
-            </span>
-            <span className="text-[11px] text-text-muted">Лимит обновляется 1-го числа</span>
-          </div>
-        </section>
+              {/* Progress track */}
+              <div className="w-full h-3 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  role="progressbar"
+                  aria-valuenow={percentage}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  className={cn(
+                    'h-full rounded-full transition-all duration-300',
+                    percentage > 90
+                      ? 'bg-rose-500'
+                      : percentage > 70
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-500'
+                  )}
+                  style={{ width: `${Math.min(percentage, 100)}%` }}
+                />
+              </div>
+
+              <div className="flex items-center justify-between mt-2 text-xs">
+                <span className="text-text-muted">
+                  Остаток лимита: <strong className="text-emerald-600 font-mono">{remaining.toLocaleString('ru-RU')} ₽</strong>
+                </span>
+                <span className="text-[11px] text-text-muted">Лимит обновляется 1-го числа</span>
+              </div>
+            </section>
+          );
+        })()}
+
 
         {/* Habits & Focus Streak (2 columns on lg) */}
         <section

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { Task, CalendarEvent, BudgetSummary } from '@/types/domain';
+import { Task, TaskStatus, CalendarEvent, BudgetSummary } from '@/types/domain';
+
 import { MorningBrief } from '@/types/ai';
 
 export function useDashboardToday() {
@@ -42,7 +43,7 @@ export function useDashboardToday() {
     {
       id: 'task-2',
       title: 'Запустить миграцию базы данных PostgreSQL 16',
-      status: 'todo',
+      status: TaskStatus.TODO,
       priority: 'critical',
       due_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(), // Overdue
       project: { id: 'p-infra', name: 'infra', color: '#ef4444' },
@@ -53,7 +54,7 @@ export function useDashboardToday() {
     {
       id: 'task-4',
       title: 'Ревью архитектуры UI компонентов (PR #42)',
-      status: 'inbox',
+      status: TaskStatus.INBOX,
       priority: 'high',
       due_at: new Date(Date.now() + 6 * 3600 * 1000).toISOString(),
       project: { id: 'p-frontend', name: 'frontend', color: '#0ea5e9' },
@@ -67,7 +68,7 @@ export function useDashboardToday() {
     {
       id: 'task-2',
       title: 'Запустить миграцию базы данных PostgreSQL 16',
-      status: 'todo',
+      status: TaskStatus.TODO,
       priority: 'critical',
       due_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
       project: { id: 'p-infra', name: 'infra', color: '#ef4444' },
@@ -81,6 +82,8 @@ export function useDashboardToday() {
     {
       id: 'ev-1',
       title: 'Daily Standup с продуктовой командой',
+      start_time: '2026-09-11T10:00:00Z',
+      end_time: '2026-09-11T10:30:00Z',
       start: '10:00',
       end: '10:30',
       is_external: false,
@@ -89,6 +92,8 @@ export function useDashboardToday() {
     {
       id: 'ev-2',
       title: 'Team Sync (Google Calendar)',
+      start_time: '2026-09-11T11:30:00Z',
+      end_time: '2026-09-11T12:30:00Z',
       start: '11:30',
       end: '12:30',
       is_external: true,
@@ -97,6 +102,8 @@ export function useDashboardToday() {
     {
       id: 'ev-3',
       title: 'Архитектурный синк по Personal OS',
+      start_time: '2026-09-11T16:00:00Z',
+      end_time: '2026-09-11T17:00:00Z',
       start: '16:00',
       end: '17:00',
       is_external: false,
@@ -105,6 +112,9 @@ export function useDashboardToday() {
   ]);
 
   const [budgetSummary] = useState<BudgetSummary>({
+    daily_spent_minor: 120000,
+    monthly_spent_minor: 4250000,
+    monthly_limit_minor: 6000000,
     spent: 42500,
     limit: 60000,
     currency: 'RUB',
@@ -112,6 +122,7 @@ export function useDashboardToday() {
     remaining: 17500,
     category: 'Все категории',
   });
+
 
   const dismissBrief = () => setBrief(null);
 

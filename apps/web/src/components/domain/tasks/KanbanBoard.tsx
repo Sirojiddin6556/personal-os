@@ -26,12 +26,12 @@ export interface KanbanBoardProps {
 }
 
 export const KANBAN_COLUMNS: { id: TaskStatus; title: string; dotColor: string }[] = [
-  { id: 'inbox', title: 'Входящие (Inbox)', dotColor: '#6366f1' },
-  { id: 'todo', title: 'К выполнению', dotColor: '#0ea5e9' },
-  { id: 'scheduled', title: 'Запланировано', dotColor: '#8b5cf6' },
-  { id: 'in_progress', title: 'В работе', dotColor: '#f59e0b' },
-  { id: 'waiting', title: 'Ожидание', dotColor: '#ec4899' },
-  { id: 'done', title: 'Завершено', dotColor: '#10b981' },
+  { id: TaskStatus.INBOX, title: 'Входящие (Inbox)', dotColor: '#6366f1' },
+  { id: TaskStatus.TODO, title: 'К выполнению', dotColor: '#0ea5e9' },
+  { id: TaskStatus.SCHEDULED, title: 'Запланировано', dotColor: '#8b5cf6' },
+  { id: TaskStatus.IN_PROGRESS, title: 'В работе', dotColor: '#f59e0b' },
+  { id: TaskStatus.WAITING, title: 'Ожидание', dotColor: '#ec4899' },
+  { id: TaskStatus.DONE, title: 'Завершено', dotColor: '#10b981' },
 ];
 
 export function KanbanBoard({
@@ -68,7 +68,7 @@ export function KanbanBoard({
     const overId = String(over.id);
 
     // 1. Check if dropped directly onto a column container
-    const targetColumn = KANBAN_COLUMNS.find((col) => col.id === overId);
+    const targetColumn = KANBAN_COLUMNS.find((col) => col.id === overId || String(col.id) === overId);
     if (targetColumn) {
       onMoveTask(sourceTaskId, targetColumn.id);
       return;
@@ -77,9 +77,10 @@ export function KanbanBoard({
     // 2. Check if dropped over another task
     const overTask = tasks.find((t) => t.id === overId);
     if (overTask) {
-      onMoveTask(sourceTaskId, overTask.status);
+      onMoveTask(sourceTaskId, overTask.status as TaskStatus);
     }
   };
+
 
   const activeTask = activeTaskId ? tasks.find((t) => t.id === activeTaskId) : null;
 

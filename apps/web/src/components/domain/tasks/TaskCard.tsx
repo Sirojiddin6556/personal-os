@@ -36,23 +36,30 @@ export function TaskCard({
   const isDragging = isCustomDragging || isSortableDragging;
 
   // Overdue check
+  const dueDate = task.due_at || task.due_date;
   const isOverdue =
-    task.due_at &&
+    dueDate &&
+
     task.status !== 'done' &&
-    new Date(task.due_at).getTime() < Date.now();
+    new Date(dueDate).getTime() < Date.now();
 
   // Subtasks completion
   const subtasks = task.subtasks || [];
-  const completedSubtasks = subtasks.filter((s) => s.completed).length;
+  const completedSubtasks = subtasks.filter(
+    (s) => s.is_completed || (s as unknown as { completed: boolean }).completed
+  ).length;
 
-  const isCompleted = task.status === 'done';
+  const isCompleted = task.status === 'done' || task.status === 'canceled';
 
-  const priorityStyles = {
-    critical: 'bg-rose-100 text-rose-700 dark:bg-rose-950/80 dark:text-rose-300 border-rose-200 dark:border-rose-900',
-    high: 'bg-orange-100 text-orange-700 dark:bg-orange-950/80 dark:text-orange-300 border-orange-200 dark:border-orange-900',
-    medium: 'bg-sky-100 text-sky-700 dark:bg-sky-950/80 dark:text-sky-300 border-sky-200 dark:border-sky-900',
-    low: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700',
-  };
+  const normalizedPriority = String(task.priority || 'medium').toLowerCase();
+  const priorityClass =
+    normalizedPriority.includes('critical') || normalizedPriority.includes('p1') || normalizedPriority.includes('urgent')
+      ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/80 dark:text-rose-300 border-rose-200 dark:border-rose-900'
+      : normalizedPriority.includes('high') || normalizedPriority.includes('p2')
+      ? 'bg-orange-100 text-orange-700 dark:bg-orange-950/80 dark:text-orange-300 border-orange-200 dark:border-orange-900'
+      : normalizedPriority.includes('low') || normalizedPriority.includes('p4')
+      ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-slate-200 dark:border-slate-700'
+      : 'bg-sky-100 text-sky-700 dark:bg-sky-950/80 dark:text-sky-300 border-sky-200 dark:border-sky-900';
 
   return (
     <div
@@ -106,12 +113,13 @@ export function TaskCard({
         <span
           className={cn(
             'inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase shrink-0',
-            priorityStyles[task.priority] || priorityStyles.medium
+            priorityClass
           )}
         >
           !{task.priority}
         </span>
       </div>
+
 
       {/* Middle row: Checkbox + Title */}
       <div className="flex items-start gap-2.5 mb-2">

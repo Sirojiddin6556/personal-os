@@ -13,12 +13,15 @@ import {
 } from '@tanstack/react-query';
 import { apiRequest, fetchPaginated } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
+import React from 'react';
 import {
   Task,
   TaskStatus,
+  TaskStatusType,
   Priority,
   PaginatedResponse,
 } from '@/types/domain';
+
 
 export interface TaskFilterParams {
   status?: TaskStatus | string;

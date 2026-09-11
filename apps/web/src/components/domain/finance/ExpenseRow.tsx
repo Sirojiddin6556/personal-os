@@ -33,7 +33,11 @@ export function ExpenseRow({ transaction, onClick }: ExpenseRowProps) {
     );
   };
 
-  const amountSign = isIncome ? transaction.amount : -Math.abs(transaction.amount);
+  const amountValue =
+    transaction.amount ??
+    (transaction.amount_minor !== undefined ? transaction.amount_minor / 100 : 0);
+  const amountSign = isIncome ? amountValue : -Math.abs(amountValue);
+  const dateStr = transaction.date || transaction.transaction_date || new Date().toISOString();
 
   return (
     <div
@@ -59,12 +63,12 @@ export function ExpenseRow({ transaction, onClick }: ExpenseRowProps) {
 
         <div className="truncate">
           <p className="text-sm font-semibold text-text-primary truncate">
-            {transaction.description || transaction.category}
+            {transaction.description || transaction.category || 'Без описания'}
           </p>
           <div className="flex items-center gap-2 text-xs text-text-secondary">
-            <span className="font-medium text-text-secondary">{transaction.category}</span>
+            <span className="font-medium text-text-secondary">{transaction.category || 'Общие'}</span>
             <span>•</span>
-            <span className="text-text-muted">{transaction.account_name}</span>
+            <span className="text-text-muted">{transaction.account_name || 'Счёт'}</span>
           </div>
         </div>
       </div>
@@ -79,14 +83,15 @@ export function ExpenseRow({ transaction, onClick }: ExpenseRowProps) {
               : 'text-rose-600 dark:text-rose-400'
           )}
         >
-          {formatCurrency(amountSign, transaction.currency)}
+          {formatCurrency(amountSign, transaction.currency || 'RUB')}
         </p>
         <p className="text-[11px] text-text-muted mt-0.5">
-          {formatDateShort(transaction.date)}
+          {formatDateShort(dateStr)}
         </p>
       </div>
     </div>
   );
+
 }
 
 export default ExpenseRow;
