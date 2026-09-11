@@ -87,10 +87,13 @@ export function useTasksList(filters?: TaskFilterParams) {
         filters: filters as Record<string, string | number | boolean | undefined>,
       }),
     getNextPageParam: (lastPage) =>
-      lastPage.pagination.has_more ? lastPage.pagination.next_cursor : undefined,
+      lastPage?.pagination?.has_more ? lastPage.pagination.next_cursor : undefined,
   });
 
-  const tasks: Task[] = query.data?.pages.flatMap((page) => page.items) ?? [];
+  const tasks: Task[] = React.useMemo(
+    () => query.data?.pages.flatMap((page) => page.items) ?? [],
+    [query.data]
+  );
 
   return {
     tasks,
@@ -446,127 +449,79 @@ export function useMoveTask() {
 }
 
 /**
+ * Mutation hook for deleting a task with optimistic cache eviction.
+ */
+export function useDeleteTask() {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, Error, { id: string; version?: number }, { previousQueries: Array<[readonly unknown[], unknown]> }>({
+    mutationFn: ({ id, version }: { id: string; version?: number }) =>
+      apiRequest<void>('DELETE', `/tasks/${id}`, {
+        version,
+      }),
+    onMutate: async ({ id }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.tasks.all });
+
+      const queries = queryClient.getQueriesData<InfiniteData<PaginatedResponse<Task>>>({
+        queryKey: queryKeys.tasks.all,
+      });
+      const previousQueries = queries.map(([key, data]) => [key, data] as [readonly unknown[], unknown]);
+
+      queryClient.setQueriesData<InfiniteData<PaginatedResponse<Task>>>(
+        { queryKey: queryKeys.tasks.all },
+        (oldData) => {
+          if (!oldData) return oldData;
+          return {
+            ...oldData,
+            pages: oldData.pages.map((page) => ({
+              ...page,
+              items: page.items.filter((item) => item.id !== id),
+            })),
+          };
+        }
+      );
+
+      return { previousQueries };
+    },
+    onError: (_err, _vars, context) => {
+      context?.previousQueries.forEach(([key, oldData]) => {
+        queryClient.setQueryData(key, oldData);
+      });
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.today() });
+    },
+  });
+}
+
+/**
  * Composite hook for tasks list with filtering and optimistic mutations.
  */
-const DEFAULT_INITIAL_TASKS: Task[] = [
-  {
-    id: 'task-1',
-    title: 'Подготовить отчёт по квартальной выручке',
-    description_markdown: 'Собрать данные из CRM и 1C, свести P&L в единый дашборд',
-    status: TaskStatus.INBOX,
-    priority: Priority.P2,
-    due_at: new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
-    project: { id: 'p-work', name: 'work', color: '#6366f1' },
-    subtasks: [
-      { id: 'sub-1', title: 'Экспорт из 1С', is_completed: true, sort_order: 1 },
-      { id: 'sub-2', title: 'Сверка с банковскими выписками', is_completed: true, sort_order: 2 },
-      { id: 'sub-3', title: 'Сборка P&L', is_completed: false, sort_order: 3 },
-      { id: 'sub-4', title: 'Ревью финансового директора', is_completed: false, sort_order: 4 },
-    ],
-    sort_order: 1,
-    tags: ['finance', 'quarterly'],
-    version: 1,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'task-2',
-    title: 'Запустить миграцию базы данных PostgreSQL 16',
-    description_markdown: 'Проверить RLS политики и индексы полнотекстового поиска',
-    status: TaskStatus.TODO,
-    priority: Priority.P1,
-    due_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
-    project: { id: 'p-infra', name: 'infra', color: '#ef4444' },
-    subtasks: [
-      { id: 'sub-5', title: 'Создать резервную копию pg_dump', is_completed: true, sort_order: 1 },
-      { id: 'sub-6', title: 'Применить миграцию Alembic', is_completed: false, sort_order: 2 },
-    ],
-    sort_order: 1,
-    tags: ['devops', 'db'],
-    version: 1,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'task-3',
-    title: 'Забронировать билеты на конференцию HighLoad++',
-    description_markdown: 'Выбрать перелёт и гостиницу рядом с кластером Сколково',
-    status: TaskStatus.SCHEDULED,
-    priority: Priority.P3,
-    due_at: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
-    project: { id: 'p-personal', name: 'personal', color: '#10b981' },
-    subtasks: [],
-    sort_order: 1,
-    tags: ['travel', 'edu'],
-    version: 1,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'task-4',
-    title: 'Ревью архитектуры UI компонентов (PR #42)',
-    description_markdown: 'Проверить ARIA роли, фокус-ринги и соответствие дизайн-токенам',
-    status: TaskStatus.IN_PROGRESS,
-    priority: Priority.P2,
-    due_at: new Date(Date.now() + 6 * 3600 * 1000).toISOString(),
-    project: { id: 'p-frontend', name: 'frontend', color: '#0ea5e9' },
-    subtasks: [
-      { id: 'sub-7', title: 'Проверка доступности axe-core', is_completed: true, sort_order: 1 },
-      { id: 'sub-8', title: 'Проверка темной темы', is_completed: false, sort_order: 2 },
-    ],
-    sort_order: 1,
-    tags: ['code-review', 'a11y'],
-    version: 1,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'task-5',
-    title: 'Ждать согласование бюджета от финотдела',
-    description_markdown: 'Ожидается подтверждение счета на лицензии LLM',
-    status: TaskStatus.WAITING,
-    priority: Priority.P4,
-    due_at: new Date(Date.now() + 72 * 3600 * 1000).toISOString(),
-    project: { id: 'p-work', name: 'work', color: '#6366f1' },
-    subtasks: [],
-    sort_order: 1,
-    tags: ['finance', 'external'],
-    version: 1,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 'task-6',
-    title: 'Настройка Telegram Bot Webhook для Personal OS',
-    description_markdown: 'Интеграция бота для быстрого ввода задач через голосовые сообщения',
-    status: TaskStatus.DONE,
-    priority: Priority.P3,
-    due_at: new Date(Date.now() - 24 * 3600 * 1000).toISOString(),
-    project: { id: 'p-bot', name: 'integration', color: '#8b5cf6' },
-    subtasks: [{ id: 'sub-9', title: 'TLS сертификат и эндпоинт', is_completed: true, sort_order: 1 }],
-    sort_order: 1,
-    tags: ['telegram', 'api'],
-    version: 1,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
-
 export function useTasks(filters?: {
   status?: string;
   priority?: string;
   project?: string;
   search?: string;
 }) {
-  const [tasks, setTasks] = React.useState<Task[]>(DEFAULT_INITIAL_TASKS);
+  const { tasks: serverTasks, isLoading, refetch } = useTasksList();
+  const [tasks, setTasks] = React.useState<Task[]>([]);
   const moveTaskMutation = useMoveTask();
   const completeTaskMutation = useCompleteTask();
+  const deleteTaskMutation = useDeleteTask();
 
   const filteredTasks = React.useMemo(() => {
-    return tasks.filter((task) => {
+    const list = tasks.length > 0 ? tasks : serverTasks;
+    return list.filter((task) => {
       if (filters?.status && filters.status !== 'all' && task.status !== filters.status) return false;
       if (filters?.priority && filters.priority !== 'all' && task.priority !== filters.priority) return false;
-      if (filters?.project && filters.project !== 'all' && task.project?.name !== filters.project) return false;
+      if (filters?.project && filters.project !== 'all') {
+        const projFilter = filters.project.toLowerCase().replace(/^#/, '');
+        const matchName = task.project?.name?.toLowerCase() === projFilter;
+        const matchId = task.project_id === filters.project;
+        const matchTag = task.tags?.some((tag) => tag.toLowerCase().replace(/^#/, '') === projFilter);
+        if (!matchName && !matchId && !matchTag) return false;
+      }
       if (filters?.search) {
         const q = filters.search.toLowerCase();
         return (
@@ -576,7 +531,7 @@ export function useTasks(filters?: {
       }
       return true;
     });
-  }, [tasks, filters]);
+  }, [tasks, serverTasks, filters]);
 
   const moveTask = React.useCallback(
     (taskId: string, targetStatus: TaskStatus | TaskStatusType, newIndex?: number) => {
@@ -592,7 +547,6 @@ export function useTasks(filters?: {
             : t
         )
       );
-      // Background optimistic mutation
       moveTaskMutation.mutate({
         id: taskId,
         version: 1,
@@ -622,17 +576,29 @@ export function useTasks(filters?: {
     [completeTaskMutation]
   );
 
+  const deleteTask = React.useCallback(
+    (taskId: string) => {
+      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+      deleteTaskMutation.mutate({ id: taskId });
+    },
+    [deleteTaskMutation]
+  );
+
   return {
     tasks: filteredTasks,
     allTasks: tasks,
+    isLoading,
+    refetch,
     moveTask,
     completeTask,
+    deleteTask,
   };
 }
 
 export function useTaskMutations() {
   const moveTaskMutation = useMoveTask();
   const completeTaskMutation = useCompleteTask();
+  const deleteTaskMutation = useDeleteTask();
 
   return {
     moveTaskOptimistic: (params: { taskId: string; targetColumnOrTaskId: string }) => {
@@ -644,6 +610,9 @@ export function useTaskMutations() {
     },
     completeTask: (taskId: string) => {
       completeTaskMutation.mutate({ id: taskId, version: 1 });
+    },
+    deleteTask: (taskId: string) => {
+      deleteTaskMutation.mutate({ id: taskId });
     },
   };
 }

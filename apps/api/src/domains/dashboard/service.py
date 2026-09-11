@@ -144,7 +144,7 @@ async def get_budget_summary(
     active_count = row[1] or 0
     return BudgetSummary(
         total_balance_minor=int(total_balance),
-        currency="RUB",
+        currency="UZS",
         active_accounts_count=active_count,
     )
 

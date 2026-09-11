@@ -36,6 +36,8 @@ export const queryKeys = {
     all: ['finance'] as const,
     accounts: () =>
       [...queryKeys.finance.all, 'accounts'] as const,
+    categories: () =>
+      [...queryKeys.finance.all, 'categories'] as const,
     transactions: (filters?: Record<string, unknown>) =>
       [...queryKeys.finance.all, 'transactions', filters] as const,
     budgets: (month?: string) =>

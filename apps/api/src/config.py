@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Database & Storage
     database_url: str = Field(
-        default="postgresql+asyncpg://postgres:postgres@localhost:5432/personal_os",
+        default="postgresql+asyncpg://postgres:postgrespassword@localhost:5432/personal_os_dev",
         description="Asyncpg PostgreSQL connection URL",
     )
     redis_url: str = Field(

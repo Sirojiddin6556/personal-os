@@ -64,6 +64,8 @@ class ProjectService:
             icon=body.icon,
             status=body.status,
             target_date=body.target_date,
+            github_repo=body.github_repo,
+            github_default_branch=body.github_default_branch or "main",
         )
         session.add(project)
         await publish_event(
@@ -72,7 +74,7 @@ class ProjectService:
             aggregate_type="project",
             aggregate_id=project.id,
             workspace_id=workspace_id,
-            data={"name": project.name, "status": project.status},
+            data={"name": project.name, "status": project.status, "github_repo": project.github_repo},
         )
         await session.commit()
         await session.refresh(project)
@@ -113,6 +115,19 @@ class ProjectService:
         await session.commit()
         await session.refresh(proj)
         return proj
+
+    async def delete_project(self, session: AsyncSession, workspace_id: UUID, project_id: UUID) -> None:
+        proj = await self.get_project(session, workspace_id, project_id)
+        await session.delete(proj)
+        await publish_event(
+            session=session,
+            event_type="project.deleted.v1",
+            aggregate_type="project",
+            aggregate_id=project_id,
+            workspace_id=workspace_id,
+            data={"name": proj.name},
+        )
+        await session.commit()
 
     # --- Milestones ---
     async def create_milestone(

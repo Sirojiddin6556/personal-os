@@ -48,6 +48,8 @@ class ProjectCreate(BaseModel):
     icon: Optional[str] = None
     status: str = Field(default="active", pattern="^(active|completed|on_hold|archived)$")
     target_date: Optional[date] = None
+    github_repo: Optional[str] = None
+    github_default_branch: Optional[str] = "main"
 
 
 class ProjectUpdate(BaseModel):
@@ -58,6 +60,8 @@ class ProjectUpdate(BaseModel):
     icon: Optional[str] = None
     status: Optional[str] = Field(default=None, pattern="^(active|completed|on_hold|archived)$")
     target_date: Optional[date] = None
+    github_repo: Optional[str] = None
+    github_default_branch: Optional[str] = None
 
 
 class ProjectResponse(BaseModel):
@@ -70,6 +74,8 @@ class ProjectResponse(BaseModel):
     icon: Optional[str] = None
     status: str
     target_date: Optional[date] = None
+    github_repo: Optional[str] = None
+    github_default_branch: Optional[str] = "main"
     created_at: datetime
     updated_at: datetime
 

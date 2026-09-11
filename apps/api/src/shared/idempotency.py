@@ -18,20 +18,34 @@ class IdempotencyService:
     def __init__(self, redis_url: str = settings.redis_url):
         self.redis_url = redis_url
         self._redis_client = None
+        self._loop = None
 
     async def get_client(self):
+        import asyncio
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if self._redis_client is not None and self._loop != current_loop:
+            self._redis_client = None
+            self._loop = None
+
         if self._redis_client is None:
             try:
                 import redis.asyncio as aioredis
-                self._redis_client = aioredis.from_url(
+                client = aioredis.from_url(
                     self.redis_url,
                     encoding="utf-8",
                     decode_responses=True,
                 )
-                await self._redis_client.ping()
+                await client.ping()
+                self._redis_client = client
+                self._loop = current_loop
             except Exception as ex:
                 logger.warning("Redis not available for idempotency (%s). Falling back to memory cache.", ex)
                 self._redis_client = False
+                self._loop = current_loop
         return self._redis_client if self._redis_client is not False else None
 
     @staticmethod

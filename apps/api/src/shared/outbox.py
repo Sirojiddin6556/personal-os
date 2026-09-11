@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, text
+from sqlalchemy import TIMESTAMP, select, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -31,10 +31,14 @@ class OutboxEvent(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
     max_retries: Mapped[int] = mapped_column(default=5, nullable=False)
     last_error: Mapped[Optional[str]] = mapped_column(nullable=True)
     occurred_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
-    published_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=True,
+    )
 
 
 async def publish_event(

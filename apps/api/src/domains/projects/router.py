@@ -65,6 +65,15 @@ async def update_project(
     return ProjectResponse.model_validate(p)
 
 
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_project(
+    project_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> None:
+    await project_service.delete_project(session, workspace.id, project_id)
+
+
 # Goals
 @goals_router.post("/", response_model=GoalResponse, status_code=status.HTTP_201_CREATED)
 async def create_goal(

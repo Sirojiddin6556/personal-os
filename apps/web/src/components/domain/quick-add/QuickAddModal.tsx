@@ -247,13 +247,13 @@ export function QuickAddModal() {
             {selectedIntent === 'expense' && (
               <div>
                 <label className="block text-xs font-semibold text-text-secondary mb-1">
-                  Сумма (₽)
+                  Сумма (UZS / сум)
                 </label>
                 <input
                   type="number"
                   value={manualAmount}
                   onChange={(e) => setManualAmount(e.target.value)}
-                  placeholder="450"
+                  placeholder="45000"
                   className="w-full px-3 py-2 text-sm bg-surface-muted border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-primary font-mono"
                 />
               </div>

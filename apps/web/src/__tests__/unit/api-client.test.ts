@@ -321,7 +321,15 @@ describe('fetchPaginated helper', () => {
       filters: { status: 'inbox' },
     });
 
-    expect(result).toEqual(mockPage);
+    expect(result).toEqual({
+      items: mockPage.items,
+      pagination: {
+        has_more: true,
+        next_cursor: 'cursor_token_next',
+        prev_cursor: null,
+        total_count: 50,
+      },
+    });
 
     const [url] = (global.fetch as any).mock.calls[0];
     expect(url).toContain('cursor=cur123');

@@ -21,10 +21,14 @@ export interface CreateEventInput {
 }
 
 export interface CreateTimeBlockInput {
-  task_id: string;
-  start_time: string;
-  end_time: string;
+  task_id?: string | null;
+  start_time?: string;
+  end_time?: string;
+  starts_at?: string;
+  ends_at?: string;
+  label?: string | null;
   is_locked?: boolean;
+  is_fixed?: boolean;
 }
 
 export interface GoogleSyncStatusResponse {

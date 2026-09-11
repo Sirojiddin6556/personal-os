@@ -5,9 +5,12 @@ import { usePathname } from 'next/navigation';
 import { useUIStore } from '@/stores/ui-store';
 import { cn } from '@/lib/utils';
 
+import { useProjects } from '@/hooks/useGitHub';
+
 export function SidebarNav() {
   const pathname = usePathname() || '/today';
   const { isSidebarCollapsed, toggleSidebar } = useUIStore();
+  const { data: dbProjects = [] } = useProjects();
 
   const navItems = [
     {
@@ -22,9 +25,22 @@ export function SidebarNav() {
       ),
     },
     {
+      label: 'Ежедневник',
+      href: '/planner',
+      badge: null,
+      icon: (
+        <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+          <line x1="8" y1="7" x2="16" y2="7" />
+          <line x1="8" y1="11" x2="14" y2="11" />
+        </svg>
+      ),
+    },
+    {
       label: 'Задачи',
       href: '/tasks',
-      badge: '4',
+      badge: null,
       icon: (
         <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
@@ -32,6 +48,16 @@ export function SidebarNav() {
           <line x1="8" y1="2" x2="8" y2="6" />
           <line x1="3" y1="10" x2="21" y2="10" />
           <path d="M9 16l2 2 4-4" />
+        </svg>
+      ),
+    },
+    {
+      label: 'Проекты & GitHub',
+      href: '/projects',
+      badge: null,
+      icon: (
+        <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
         </svg>
       ),
     },
@@ -70,12 +96,6 @@ export function SidebarNav() {
         </svg>
       ),
     },
-  ];
-
-  const projects = [
-    { name: 'work', color: '#6366f1' },
-    { name: 'personal', color: '#10b981' },
-    { name: 'infra', color: '#ef4444' },
   ];
 
   return (
@@ -136,28 +156,42 @@ export function SidebarNav() {
           <div className="pt-6 pb-2">
             <div className="px-3 text-[11px] font-bold uppercase tracking-wider text-text-muted mb-2 flex items-center justify-between">
               <span>Проекты</span>
-              <button
-                className="hover:text-text-primary transition-colors text-xs"
-                title="Новый проект"
-                onClick={() => alert('Создание проекта')}
+              <a
+                href="/projects"
+                className="hover:text-text-primary transition-colors text-xs font-bold"
+                title="Управление проектами"
               >
                 +
-              </button>
+              </a>
             </div>
             <div className="space-y-0.5">
-              {projects.map((proj) => (
+              {dbProjects.length > 0 ? (
+                dbProjects.map((proj) => (
+                  <a
+                    key={proj.id}
+                    href={`/projects?id=${proj.id}`}
+                    className="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-muted transition-colors"
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: proj.color || '#6366f1' }}
+                    />
+                    <span className="truncate flex-1">{proj.name}</span>
+                    {proj.github_repo && (
+                      <span className="text-[9px] px-1 py-0.2 rounded bg-surface-muted text-text-muted font-mono">
+                        git
+                      </span>
+                    )}
+                  </a>
+                ))
+              ) : (
                 <a
-                  key={proj.name}
-                  href={`/tasks?project=${proj.name}`}
-                  className="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-muted transition-colors"
+                  href="/projects"
+                  className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary block transition-colors italic"
                 >
-                  <span
-                    className="w-2 h-2 rounded-full shrink-0"
-                    style={{ backgroundColor: proj.color }}
-                  />
-                  <span className="truncate">#{proj.name}</span>
+                  + Добавить проект
                 </a>
-              ))}
+              )}
             </div>
           </div>
         )}

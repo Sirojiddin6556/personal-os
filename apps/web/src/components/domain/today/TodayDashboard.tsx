@@ -142,12 +142,20 @@ export function TodayDashboard() {
                   {agenda.length} события
                 </span>
               </div>
-              <a
-                href="/calendar"
-                className="text-xs font-semibold text-primary hover:underline"
-              >
-                В календарь →
-              </a>
+              <div className="flex items-center gap-3">
+                <a
+                  href="/planner"
+                  className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
+                >
+                  <span>📓 Ежедневник</span>
+                </a>
+                <a
+                  href="/calendar"
+                  className="text-xs font-semibold text-text-muted hover:text-text-primary"
+                >
+                  Календарь →
+                </a>
+              </div>
             </div>
 
             {/* Timeline items */}
@@ -225,7 +233,7 @@ export function TodayDashboard() {
                   Израсходовано {percentage}%
                 </span>
                 <span className="font-mono text-text-primary font-bold">
-                  {spent.toLocaleString('ru-RU')} / {limit.toLocaleString('ru-RU')} ₽
+                  {spent.toLocaleString('ru-RU')} / {limit.toLocaleString('ru-RU')} {budgetSummary.currency === 'RUB' ? '₽' : 'сум'}
                 </span>
               </div>
 
@@ -250,7 +258,7 @@ export function TodayDashboard() {
 
               <div className="flex items-center justify-between mt-2 text-xs">
                 <span className="text-text-muted">
-                  Остаток лимита: <strong className="text-emerald-600 font-mono">{remaining.toLocaleString('ru-RU')} ₽</strong>
+                  Остаток лимита: <strong className="text-emerald-600 font-mono">{remaining.toLocaleString('ru-RU')} {budgetSummary.currency === 'RUB' ? '₽' : 'сум'}</strong>
                 </span>
                 <span className="text-[11px] text-text-muted">Лимит обновляется 1-го числа</span>
               </div>

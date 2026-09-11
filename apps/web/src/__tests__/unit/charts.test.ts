@@ -15,50 +15,53 @@ import {
 describe('formatMinorUnits', () => {
   it('formats positive minor units in RUB with Russian locale format', () => {
     const res = formatMinorUnits(10050, 'RUB');
-    // In ru-RU locale, 100.50 can have non-breaking space or regular space
-    expect(res).toMatch(/100[,.]50\s*₽/);
+    expect(res).toMatch(/100[,.]5\s*₽/);
   });
 
   it('formats zero minor units in RUB', () => {
     const res = formatMinorUnits(0, 'RUB');
-    expect(res).toMatch(/0[,.]00\s*₽/);
+    expect(res).toMatch(/0\s*₽/);
   });
 
   it('formats negative minor units with minus sign', () => {
     const res = formatMinorUnits(-25000, 'RUB');
     expect(res.startsWith('-')).toBe(true);
-    expect(res).toMatch(/-250[,.]00\s*₽/);
+    expect(res).toMatch(/-250\s*₽/);
   });
 
   it('formats USD with dollar sign prefix', () => {
-    expect(formatMinorUnits(100, 'USD')).toBe('$1.00');
-    expect(formatMinorUnits(1550, 'USD')).toBe('$15.50');
-    expect(formatMinorUnits(-500, 'USD')).toBe('-$5.00');
+    expect(formatMinorUnits(100, 'USD')).toBe('$1');
+    expect(formatMinorUnits(1550, 'USD')).toBe('$15,5');
+    expect(formatMinorUnits(-500, 'USD')).toBe('-$5');
   });
 
   it('formats EUR with euro sign prefix', () => {
-    expect(formatMinorUnits(2000, 'EUR')).toBe('€20.00');
-    expect(formatMinorUnits(-1234, 'EUR')).toBe('-€12.34');
+    expect(formatMinorUnits(2000, 'EUR')).toBe('€20');
+    expect(formatMinorUnits(-1234, 'EUR')).toBe('-€12,34');
   });
 
   it('formats GBP with pound sign prefix', () => {
-    expect(formatMinorUnits(999, 'GBP')).toBe('£9.99');
-    expect(formatMinorUnits(-999, 'GBP')).toBe('-£9.99');
+    expect(formatMinorUnits(999, 'GBP')).toBe('£9,99');
+    expect(formatMinorUnits(-999, 'GBP')).toBe('-£9,99');
   });
 
   it('formats JPY with yen sign prefix', () => {
-    expect(formatMinorUnits(50000, 'JPY')).toBe('¥500.00');
-    expect(formatMinorUnits(-50000, 'JPY')).toBe('-¥500.00');
+    expect(formatMinorUnits(50000, 'JPY')).toBe('¥500');
+    expect(formatMinorUnits(-50000, 'JPY')).toBe('-¥500');
+  });
+
+  it('formats UZS correctly with sum suffix', () => {
+    expect(formatMinorUnits(1000000, 'UZS')).toContain('10\u00A0000 сум');
   });
 
   it('formats unknown currencies by appending ISO code', () => {
-    expect(formatMinorUnits(10000, 'CAD')).toBe('100.00 CAD');
-    expect(formatMinorUnits(-10000, 'CAD')).toBe('-100.00 CAD');
+    expect(formatMinorUnits(10000, 'CAD')).toBe('100 CAD');
+    expect(formatMinorUnits(-10000, 'CAD')).toBe('-100 CAD');
   });
 
-  it('handles default currency as RUB when omitted', () => {
+  it('handles default currency as UZS when omitted', () => {
     const res = formatMinorUnits(5000);
-    expect(res).toMatch(/50[,.]00\s*₽/);
+    expect(res).toBe('50 сум');
   });
 });
 

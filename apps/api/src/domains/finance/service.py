@@ -49,6 +49,40 @@ class FinanceService:
         res = await session.execute(stmt)
         return list(res.scalars().all())
 
+    async def delete_account(self, session: AsyncSession, workspace_id: UUID, account_id: UUID) -> None:
+        stmt = select(Account).where(Account.workspace_id == workspace_id, Account.id == account_id)
+        res = await session.execute(stmt)
+        acc = res.scalar_one_or_none()
+        if not acc:
+            raise NotFoundException("Account not found")
+        await session.delete(acc)
+        await session.commit()
+
+    async def update_account(
+        self, session: AsyncSession, workspace_id: UUID, account_id: UUID, body: AccountUpdate
+    ) -> Account:
+        stmt = select(Account).where(Account.workspace_id == workspace_id, Account.id == account_id)
+        res = await session.execute(stmt)
+        acc = res.scalar_one_or_none()
+        if not acc:
+            raise NotFoundException("Account not found")
+
+        if body.name is not None:
+            acc.name = body.name
+        if body.type is not None:
+            acc.type = body.type
+        if body.currency is not None:
+            acc.currency = body.currency
+        if body.balance_minor is not None:
+            acc.balance_minor = body.balance_minor
+            acc.current_balance_minor = body.balance_minor
+        if body.is_archived is not None:
+            acc.is_archived = body.is_archived
+
+        await session.commit()
+        await session.refresh(acc)
+        return acc
+
     async def create_category(
         self, session: AsyncSession, workspace_id: UUID, body: CategoryCreate
     ) -> Category:
@@ -127,9 +161,33 @@ class FinanceService:
                 )
 
         now = datetime.now(timezone.utc)
-        occurred = body.occurred_at or now
+        occurred = now
+        if body.occurred_at:
+            if isinstance(body.occurred_at, datetime):
+                occurred = body.occurred_at
+            elif isinstance(body.occurred_at, str):
+                try:
+                    occurred = datetime.fromisoformat(body.occurred_at.replace("Z", "+00:00"))
+                except Exception:
+                    occurred = now
 
-        # 2. Обновить Account.balance_minor (атомарно)
+        # 2. Resolve Category if UUID not directly provided
+        cat_id = body.category_id
+        if not cat_id and body.category_name:
+            stmt_cat = (
+                select(Category)
+                .where(
+                    Category.workspace_id == workspace_id,
+                    Category.name.ilike(f"%{body.category_name.strip()}%"),
+                )
+                .limit(1)
+            )
+            res_cat = await session.execute(stmt_cat)
+            found_cat = res_cat.scalar_one_or_none()
+            if found_cat:
+                cat_id = found_cat.id
+
+        # 3. Обновить Account.balance_minor (атомарно)
         if tx_type == "expense":
             source_account.balance_minor -= body.amount_minor
         elif tx_type == "income":
@@ -138,13 +196,13 @@ class FinanceService:
             source_account.balance_minor -= body.amount_minor
             dest_account.balance_minor += body.amount_minor
 
-        # 3. Создать Transaction(status='posted')
+        # 4. Создать Transaction(status='posted')
         tx = Transaction(
             id=uuid4(),
             workspace_id=workspace_id,
             account_id=body.account_id,
             destination_account_id=body.destination_account_id,
-            category_id=body.category_id,
+            category_id=cat_id,
             reversal_of_id=None,
             amount_minor=body.amount_minor,
             currency=body.currency.upper(),
@@ -294,12 +352,28 @@ class FinanceService:
         limit: int = 50,
         offset: int = 0,
     ) -> List[Transaction]:
-        stmt = select(Transaction).where(Transaction.workspace_id == workspace_id)
+        stmt = (
+            select(
+                Transaction,
+                Account.name.label("account_name"),
+                Category.name.label("category_name"),
+            )
+            .outerjoin(Account, Account.id == Transaction.account_id)
+            .outerjoin(Category, Category.id == Transaction.category_id)
+            .where(Transaction.workspace_id == workspace_id)
+        )
         if account_id:
             stmt = stmt.where(Transaction.account_id == account_id)
         stmt = stmt.order_by(Transaction.occurred_at.desc()).limit(limit).offset(offset)
         res = await session.execute(stmt)
-        return list(res.scalars().all())
+        
+        results = []
+        for tx, acc_name, cat_name in res.all():
+            tx.account_name = acc_name
+            tx.category_name = cat_name
+            tx.category = cat_name
+            results.append(tx)
+        return results
 
     async def create_budget(
         self, session: AsyncSession, workspace_id: UUID, body: BudgetCreate

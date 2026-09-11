@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.domains.finance.schemas import (
     AccountCreate,
     AccountResponse,
+    AccountUpdate,
     BudgetCreate,
     BudgetResponse,
     CategoryCreate,
@@ -41,6 +42,26 @@ async def list_accounts(
 ) -> List[AccountResponse]:
     accounts = await finance_service.list_accounts(session, workspace.id)
     return [AccountResponse.model_validate(a) for a in accounts]
+
+
+@router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account(
+    account_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> None:
+    await finance_service.delete_account(session, workspace.id, account_id)
+
+
+@router.patch("/accounts/{account_id}", response_model=AccountResponse)
+async def update_account(
+    account_id: UUID,
+    body: AccountUpdate,
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> AccountResponse:
+    acc = await finance_service.update_account(session, workspace.id, account_id, body)
+    return AccountResponse.model_validate(acc)
 
 
 @router.post("/categories", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)

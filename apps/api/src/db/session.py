@@ -9,10 +9,14 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from src.config import settings
+
 DATABASE_URL: str = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/personal_os",
+    settings.database_url,
 )
+if not DATABASE_URL:
+    DATABASE_URL = settings.database_url
 
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
@@ -37,24 +41,31 @@ async_session_factory = async_sessionmaker(
 async def set_tenant_context(session: AsyncSession, workspace_id: uuid.UUID | str) -> None:
     """Set the PostgreSQL session variable for Row Level Security (RLS) tenant isolation.
     
-    Using SET LOCAL binds this setting strictly to the current transaction.
+    Using set_config with is_local=true binds this setting strictly to the current transaction.
     """
+    clean_id = str(uuid.UUID(str(workspace_id)))
     await session.execute(
-        text("SET LOCAL app.current_workspace_id = :wid"),
-        {"wid": str(workspace_id)},
+        text("SELECT set_config('app.current_workspace_id', :wid, true)"),
+        {"wid": clean_id},
     )
 
 
 async def get_session(workspace_id: uuid.UUID) -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency yielding an AsyncSession with tenant RLS context pre-configured."""
     async with async_session_factory() as session:
-        async with session.begin():
+        try:
             await set_tenant_context(session, workspace_id)
             yield session
+        except Exception:
+            await session.rollback()
+            raise
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency yielding an AsyncSession without tenant context (for auth/signup)."""
     async with async_session_factory() as session:
-        async with session.begin():
+        try:
             yield session
+        except Exception:
+            await session.rollback()
+            raise

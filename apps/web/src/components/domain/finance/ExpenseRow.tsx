@@ -37,7 +37,7 @@ export function ExpenseRow({ transaction, onClick }: ExpenseRowProps) {
     transaction.amount ??
     (transaction.amount_minor !== undefined ? transaction.amount_minor / 100 : 0);
   const amountSign = isIncome ? amountValue : -Math.abs(amountValue);
-  const dateStr = transaction.date || transaction.transaction_date || new Date().toISOString();
+  const dateStr = transaction.occurred_at || transaction.date || transaction.transaction_date || new Date().toISOString();
 
   return (
     <div
@@ -83,7 +83,7 @@ export function ExpenseRow({ transaction, onClick }: ExpenseRowProps) {
               : 'text-rose-600 dark:text-rose-400'
           )}
         >
-          {formatCurrency(amountSign, transaction.currency || 'RUB')}
+          {formatCurrency(amountSign, transaction.currency || 'UZS')}
         </p>
         <p className="text-[11px] text-text-muted mt-0.5">
           {formatDateShort(dateStr)}

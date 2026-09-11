@@ -34,11 +34,11 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
+from src.config import settings
+
+
 def get_url() -> str:
-    url = os.getenv(
-        "DATABASE_URL",
-        config.get_main_option("sqlalchemy.url", "postgresql+asyncpg://postgres:postgres@localhost:5432/personal_os"),
-    )
+    url = os.getenv("DATABASE_URL", settings.database_url)
     if url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
     return url

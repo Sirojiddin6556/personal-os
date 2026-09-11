@@ -2,17 +2,53 @@
 
 import React, { useState } from 'react';
 import { useGoogleSyncStatus } from '@/hooks/useCalendar';
+import {
+  useConnectGitHub,
+  useDisconnectGitHub,
+  useGitHubStatus,
+} from '@/hooks/useGitHub';
 import { apiRequest } from '@/lib/api-client';
 import { formatDateShort } from '@/lib/utils';
 import Link from 'next/link';
 
 export default function IntegrationsSettingsPage() {
   const { status: googleStatus, lastSync, errorMessage: googleError, isSyncing, triggerSync } = useGoogleSyncStatus();
+  const { data: githubData, isLoading: isLoadingGithub } = useGitHubStatus();
+  const connectGitHubMutation = useConnectGitHub();
+  const disconnectGitHubMutation = useDisconnectGitHub();
+
+  const [githubToken, setGithubToken] = useState('');
+  const [isConnectingGithub, setIsConnectingGithub] = useState(false);
+  const [githubError, setGithubError] = useState<string | null>(null);
 
   const [telegramStatus, setTelegramStatus] = useState<'connected' | 'disconnected'>('disconnected');
   const [telegramCode, setTelegramCode] = useState<string | null>(null);
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
   const [isDisconnectingGoogle, setIsDisconnectingGoogle] = useState(false);
+
+  const handleConnectGitHub = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!githubToken.trim()) return;
+    setIsConnectingGithub(true);
+    setGithubError(null);
+    try {
+      await connectGitHubMutation.mutateAsync({ token: githubToken.trim() });
+      setGithubToken('');
+    } catch (err: any) {
+      setGithubError(err?.message || 'Не удалось подключить GitHub. Проверьте правильность токена.');
+    } finally {
+      setIsConnectingGithub(false);
+    }
+  };
+
+  const handleDisconnectGitHub = async () => {
+    if (!confirm('Вы уверены, что хотите отключить интеграцию с GitHub?')) return;
+    try {
+      await disconnectGitHubMutation.mutateAsync();
+    } catch (err: any) {
+      alert(err?.message || 'Ошибка при отключении GitHub');
+    }
+  };
 
   const handleConnectGoogle = async () => {
     try {
@@ -90,6 +126,132 @@ export default function IntegrationsSettingsPage() {
 
       {/* Integrations Grid */}
       <div className="grid grid-cols-1 gap-6">
+        {/* Card 0: GitHub Integration */}
+        <div className="p-6 rounded-2xl bg-surface border border-border space-y-5 shadow-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-xl bg-slate-900/10 dark:bg-white/10 border border-border flex items-center justify-center shrink-0">
+                <svg className="w-6 h-6 text-text-primary" viewBox="0 0 24 24" fill="currentColor">
+                  <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
+                  <span>GitHub</span>
+                  <span
+                    className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                      githubData?.status === 'connected'
+                        ? 'bg-status-success/15 text-status-success'
+                        : 'bg-text-muted/15 text-text-muted'
+                    }`}
+                  >
+                    {isLoadingGithub
+                      ? 'Проверка...'
+                      : githubData?.status === 'connected'
+                      ? 'Подключен'
+                      : 'Не подключен'}
+                  </span>
+                </h3>
+                <p className="text-xs text-text-muted mt-0.5">
+                  Импорт репозиториев, управление ветками, коммиты и задачи по проектам.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              {githubData?.status === 'connected' ? (
+                <>
+                  <Link
+                    href="/projects"
+                    className="px-3.5 py-1.5 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-primary-600 transition-colors shadow-xs"
+                  >
+                    Перейти к проектам →
+                  </Link>
+                  <button
+                    onClick={handleDisconnectGitHub}
+                    className="px-3 py-1.5 rounded-xl border border-status-error/20 bg-status-error/5 hover:bg-status-error/10 text-xs font-semibold text-status-error transition-colors"
+                  >
+                    Отключить
+                  </button>
+                </>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Connected User Details or Token Connection Form */}
+          {githubData?.status === 'connected' && githubData.user ? (
+            <div className="p-4 rounded-xl bg-surface-muted border border-border flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                {githubData.user.avatar_url && (
+                  <img
+                    src={githubData.user.avatar_url}
+                    alt={githubData.user.login}
+                    className="w-10 h-10 rounded-full border border-border"
+                  />
+                )}
+                <div>
+                  <p className="text-sm font-bold text-text-primary">
+                    {githubData.user.name || githubData.user.login}
+                  </p>
+                  <p className="text-xs text-text-muted font-mono">
+                    @{githubData.user.login} · {githubData.user.public_repos ?? 0} репозиториев
+                  </p>
+                </div>
+              </div>
+              <a
+                href={githubData.user.html_url || `https://github.com/${githubData.user.login}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs font-medium text-primary hover:underline"
+              >
+                Открыть профиль ↗
+              </a>
+            </div>
+          ) : (
+            <form onSubmit={handleConnectGitHub} className="pt-2 space-y-3">
+              <div className="space-y-1.5">
+                <label htmlFor="gh-token" className="block text-xs font-semibold text-text-primary">
+                  Personal Access Token (classic или fine-grained):
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    id="gh-token"
+                    type="password"
+                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                    value={githubToken}
+                    onChange={(e) => setGithubToken(e.target.value)}
+                    required
+                    className="flex-1 px-3 py-2 text-xs bg-surface-muted border border-border rounded-xl text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isConnectingGithub || !githubToken.trim()}
+                    className="px-4 py-2 rounded-xl bg-primary hover:bg-primary-600 active:scale-95 text-xs font-semibold text-white transition-all shadow-xs disabled:opacity-50 shrink-0"
+                  >
+                    {isConnectingGithub ? 'Подключение...' : 'Подключить'}
+                  </button>
+                </div>
+                {githubError && (
+                  <p className="text-xs text-rose-600 dark:text-rose-400 font-medium">
+                    ⚠️ {githubError}
+                  </p>
+                )}
+              </div>
+              <p className="text-[11px] text-text-muted">
+                💡 Создать токен с правами <code className="px-1 py-0.5 rounded bg-surface-muted border border-border font-mono">repo</code> можно в{' '}
+                <a
+                  href="https://github.com/settings/tokens/new?scopes=repo"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline font-medium"
+                >
+                  GitHub Settings → Developer Settings → Personal access tokens ↗
+                </a>
+              </p>
+            </form>
+          )}
+        </div>
+
         {/* Card 1: Google Calendar */}
         <div className="p-6 rounded-2xl bg-surface border border-border space-y-5 shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">

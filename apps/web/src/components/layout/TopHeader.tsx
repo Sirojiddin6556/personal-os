@@ -11,19 +11,24 @@ export function TopHeader() {
   const { notifications, unreadCount, markRead, markAllRead } = useNotifications();
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const notifRef = useRef<HTMLDivElement | null>(null);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement | null>(null);
 
-  // Close notifications popover on click outside
+  // Close notifications and profile popovers on click outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
         setIsNotifOpen(false);
       }
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setIsProfileOpen(false);
+      }
     };
-    if (isNotifOpen) {
+    if (isNotifOpen || isProfileOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [isNotifOpen]);
+  }, [isNotifOpen, isProfileOpen]);
 
   const toggleTheme = () => {
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
@@ -188,16 +193,97 @@ export function TopHeader() {
           )}
         </div>
 
-        {/* User Profile Avatar / Settings Link */}
-        <Link
-          href="/settings/integrations"
-          title="Настройки интеграций"
-          className="flex items-center gap-2 pl-2 border-l border-border hover:opacity-80 transition-opacity"
-        >
-          <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">
-            S
-          </div>
-        </Link>
+        {/* User Profile Avatar & Dropdown Menu */}
+        <div className="relative pl-2 border-l border-border" ref={profileRef}>
+          <button
+            onClick={() => setIsProfileOpen(!isProfileOpen)}
+            aria-label="Меню профиля пользователя"
+            className="flex items-center gap-2 group cursor-pointer focus:outline-hidden"
+          >
+            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 via-primary to-purple-600 text-white font-bold text-xs flex items-center justify-center shadow-xs ring-2 ring-transparent group-hover:ring-primary/30 transition-all">
+              S
+            </div>
+            <div className="hidden md:flex flex-col text-left">
+              <span className="text-xs font-semibold text-text-primary leading-tight">Siroj</span>
+              <span className="text-[10px] text-text-muted leading-tight">Admin</span>
+            </div>
+          </button>
+
+          {isProfileOpen && (
+            <div className="absolute right-0 mt-2 w-64 bg-surface border border-border rounded-2xl shadow-xl z-50 p-2 animate-slide-in space-y-1">
+              {/* User info banner */}
+              <div className="px-3 py-2.5 rounded-xl bg-surface-muted/60 mb-1 border border-border/50">
+                <p className="text-xs font-bold text-text-primary">Siroj</p>
+                <p className="text-[11px] text-text-muted truncate">siroj@personal-os.local</p>
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">Система активна</span>
+                </div>
+              </div>
+
+              {/* Navigation links */}
+              <Link
+                href="/settings/integrations"
+                onClick={() => setIsProfileOpen(false)}
+                className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-text-primary hover:bg-surface-muted transition-colors"
+              >
+                <svg className="w-4 h-4 text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                </svg>
+                <span>Интеграции и GitHub</span>
+              </Link>
+
+              <Link
+                href="/planner"
+                onClick={() => setIsProfileOpen(false)}
+                className="flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-text-primary hover:bg-surface-muted transition-colors"
+              >
+                <svg className="w-4 h-4 text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                </svg>
+                <span>Ежедневник и привычки</span>
+              </Link>
+
+              <a
+                href="https://t.me/personal_os_bot"
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setIsProfileOpen(false)}
+                className="flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-text-primary hover:bg-surface-muted transition-colors"
+              >
+                <div className="flex items-center gap-2.5">
+                  <svg className="w-4 h-4 text-[#229ED9]" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 0 0-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.75-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/>
+                  </svg>
+                  <span>Telegram Бот</span>
+                </div>
+                <svg className="w-3 h-3 text-text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                  <polyline points="15 3 21 3 21 9" />
+                  <line x1="10" y1="14" x2="21" y2="3" />
+                </svg>
+              </a>
+
+              <div className="border-t border-border my-1" />
+
+              <button
+                onClick={() => {
+                  setIsProfileOpen(false);
+                  window.location.reload();
+                }}
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                <span>Перезагрузить сессию</span>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

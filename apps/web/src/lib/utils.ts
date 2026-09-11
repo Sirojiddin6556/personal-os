@@ -5,8 +5,9 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatCurrency(amount: number, currency: string = 'RUB'): string {
-  const symbol = currency === 'RUB' ? '₽' : currency === 'USD' ? '$' : currency === 'EUR' ? '€' : currency;
+export function formatCurrency(amount: number, currency: string = 'UZS'): string {
+  const curr = (currency || 'UZS').toUpperCase();
+  const symbol = curr === 'UZS' ? 'сум' : curr === 'RUB' ? '₽' : curr === 'USD' ? '$' : curr === 'EUR' ? '€' : curr;
   const formattedNumber = Math.abs(amount).toLocaleString('ru-RU');
   return amount < 0 ? `- ${formattedNumber} ${symbol}` : amount > 0 ? `+ ${formattedNumber} ${symbol}` : `0 ${symbol}`;
 }

@@ -18,12 +18,14 @@ from src.domains.finance.router import router as finance_router
 from src.domains.identity.router import router as identity_router
 from src.domains.knowledge.router import router as knowledge_router
 from src.domains.notifications.router import router as notifications_router
+from src.domains.planner.router import router as planner_router
 from src.domains.projects.router import (
     goals_router,
     milestones_router,
     router as projects_router,
 )
 from src.domains.tasks.router import kanban_router, router as tasks_router
+from src.integrations.github.router import router as github_router
 from src.integrations.google_calendar.router import router as google_router
 from src.integrations.telegram.router import router as telegram_router
 from src.shared.exceptions import DomainError, domain_error_handler
@@ -98,6 +100,7 @@ def create_app() -> FastAPI:
 
     # 3. Health check route
     @app.get("/health", tags=["system"], status_code=status.HTTP_200_OK)
+    @app.get("/v1/health", tags=["system"], status_code=status.HTTP_200_OK)
     async def health_check() -> Dict[str, str]:
         return {
             "status": "healthy",
@@ -119,9 +122,11 @@ def create_app() -> FastAPI:
     app.include_router(finance_router, prefix=v1_prefix)
     app.include_router(knowledge_router, prefix=v1_prefix)
     app.include_router(notifications_router, prefix=v1_prefix)
+    app.include_router(planner_router, prefix=v1_prefix)
     app.include_router(ai_advisor_router, prefix=v1_prefix)
     app.include_router(dashboard_router, prefix=v1_prefix)
     app.include_router(google_router, prefix=v1_prefix)
+    app.include_router(github_router, prefix=v1_prefix)
     app.include_router(telegram_router, prefix=v1_prefix)
     app.include_router(telegram_router)  # Support root webhook URLs from Telegram Bot API
     app.include_router(ws_router, prefix=v1_prefix)

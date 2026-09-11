@@ -16,6 +16,7 @@ import { queryKeys } from '@/lib/query-keys';
 import {
   Account,
   Budget,
+  Category,
   DashboardToday,
   PaginatedResponse,
   Transaction,
@@ -43,6 +44,21 @@ export interface CreateTransactionInput {
   is_cleared?: boolean;
 }
 
+export interface CreateAccountInput {
+  name: string;
+  type: string;
+  currency?: string;
+  initial_balance_minor?: number;
+}
+
+export interface CreateCategoryInput {
+  name: string;
+  type: 'income' | 'expense' | 'transfer';
+  color?: string;
+  icon?: string;
+  parent_id?: string | null;
+}
+
 /**
  * Hook to retrieve the list of all financial accounts and their current balances.
  */
@@ -53,12 +69,133 @@ export function useAccounts() {
   });
 
   return {
-    accounts: query.data ?? [],
+    accounts: Array.isArray(query.data) ? query.data : [],
     isLoading: query.isLoading,
     isError: query.isError,
     error: query.error,
     refetch: query.refetch,
   };
+}
+
+/**
+ * Mutation hook for creating a new financial account (card, bank account, cash wallet).
+ */
+export function useCreateAccount() {
+  const queryClient = useQueryClient();
+
+  return useMutation<Account, Error, CreateAccountInput>({
+    mutationFn: (input: CreateAccountInput) =>
+      apiRequest<Account, CreateAccountInput>('POST', '/finance/accounts', {
+        body: {
+          ...input,
+          currency: input.currency || 'UZS',
+          initial_balance_minor: input.initial_balance_minor ?? 0,
+        },
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.accounts() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.today() });
+    },
+  });
+}
+
+export interface UpdateAccountInput {
+  name?: string;
+  type?: string;
+  currency?: string;
+  balance_minor?: number;
+  is_archived?: boolean;
+}
+
+/**
+ * Mutation hook for updating account details (name, type, currency, balance).
+ */
+export function useUpdateAccount() {
+  const queryClient = useQueryClient();
+
+  return useMutation<Account, Error, { accountId: string; input: UpdateAccountInput }>({
+    mutationFn: ({ accountId, input }) =>
+      apiRequest<Account, UpdateAccountInput>('PATCH', `/finance/accounts/${accountId}`, {
+        body: input,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.accounts() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.today() });
+    },
+  });
+}
+
+/**
+ * Mutation hook for deleting an account.
+ */
+export function useDeleteAccount() {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, Error, string>({
+    mutationFn: (accountId: string) =>
+      apiRequest<void>('DELETE', `/finance/accounts/${accountId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.accounts() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.today() });
+    },
+  });
+}
+
+/**
+ * Hook to retrieve the list of financial categories.
+ */
+export function useCategories() {
+  const query = useQuery<Category[], Error>({
+    queryKey: queryKeys.finance.categories(),
+    queryFn: () => apiRequest<Category[]>('GET', '/finance/categories'),
+  });
+
+  return {
+    categories: Array.isArray(query.data) ? query.data : [],
+    isLoading: query.isLoading,
+    isError: query.isError,
+    error: query.error,
+    refetch: query.refetch,
+  };
+}
+
+/**
+ * Mutation hook to create a new category.
+ */
+export function useCreateCategory() {
+  const queryClient = useQueryClient();
+
+  return useMutation<Category, Error, CreateCategoryInput>({
+    mutationFn: (input: CreateCategoryInput) =>
+      apiRequest<Category, CreateCategoryInput>('POST', '/finance/categories', {
+        body: input,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.categories() });
+    },
+  });
+}
+
+/**
+ * Mutation hook to reverse (cancel) an immutable transaction.
+ */
+export function useReverseTransaction() {
+  const queryClient = useQueryClient();
+
+  return useMutation<Transaction, Error, { transaction_id: string; reason?: string }>({
+    mutationFn: ({ transaction_id, reason }) =>
+      apiRequest<Transaction>('POST', `/finance/transactions/${transaction_id}/reverse`, {
+        params: reason ? { reason } : undefined,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.accounts() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.today() });
+    },
+  });
 }
 
 /**
@@ -75,7 +212,7 @@ export function useTransactions(filters?: TransactionFilters) {
         filters: filters as Record<string, string | number | boolean | undefined>,
       }),
     getNextPageParam: (lastPage) =>
-      lastPage.pagination.has_more ? lastPage.pagination.next_cursor : undefined,
+      lastPage?.pagination?.has_more ? lastPage.pagination.next_cursor : undefined,
   });
 
   const transactions: Transaction[] =
@@ -248,7 +385,7 @@ export function useBudgets(month?: string) {
   });
 
   return {
-    budgets: query.data ?? [],
+    budgets: Array.isArray(query.data) ? query.data : [],
     isLoading: query.isLoading,
     isError: query.isError,
     error: query.error,

@@ -17,20 +17,22 @@ import { Priority, PriorityType, TaskStatus, TaskStatusType } from '@/types/doma
  * @param amount Minor unit integer (e.g. 100 for 1.00)
  * @param currency ISO 4217 currency code (default: 'RUB')
  */
-export function formatMinorUnits(amount: number, currency: string = 'RUB'): string {
+export function formatMinorUnits(amount: number, currency: string = 'UZS'): string {
   const isNegative = amount < 0;
   const absVal = Math.abs(amount);
   const major = absVal / 100;
-  const curr = (currency || 'RUB').toUpperCase();
+  const curr = (currency || 'UZS').toUpperCase();
 
-  const formattedMajor = major.toLocaleString(curr === 'RUB' ? 'ru-RU' : 'en-US', {
-    minimumFractionDigits: 2,
+  const formattedMajor = major.toLocaleString('ru-RU', {
+    minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   });
 
   const sign = isNegative ? '-' : '';
 
   switch (curr) {
+    case 'UZS':
+      return `${sign}${Math.round(major).toLocaleString('ru-RU')} сум`;
     case 'RUB':
       return `${sign}${formattedMajor} ₽`;
     case 'USD':
@@ -117,38 +119,67 @@ export function formatChartDate(
  * Predefined palette of accessible, distinct colors for categories.
  */
 const CATEGORY_PALETTE: Record<string, string> = {
-  // Common finance categories (Russian & English)
+  // Uzbekistan specific & common categories
   'продукты': '#f59e0b', // amber-500
+  'korzinka': '#f59e0b',
+  'корзинка': '#f59e0b',
+  'makro': '#10b981',
+  'макро': '#10b981',
   'еда': '#f59e0b',
   'кафе': '#fb923c',     // orange-400
   'рестораны': '#fb923c',
+  'чайхана': '#ea580c',
+  'milliy taomlar': '#d97706',
+  'evos': '#ef4444',
   'food': '#f59e0b',
   'транспорт': '#0ea5e9', // sky-500
   'такси': '#0284c7',    // sky-600
+  'yandex go': '#eab308',
+  'яндекс go': '#eab308',
+  'яндекс': '#eab308',
+  'метро': '#3b82f6',
   'transport': '#0ea5e9',
   'жилье': '#6366f1',    // indigo-500
   'аренда': '#4f46e5',   // indigo-600
   'коммуналка': '#818cf8',
+  'коммунальные услуги': '#818cf8',
   'housing': '#6366f1',
   'развлечения': '#ec4899', // pink-500
   'досуг': '#ec4899',
+  'кино': '#ec4899',
   'entertainment': '#ec4899',
   'здоровье': '#10b981', // emerald-500
   'аптека': '#059669',   // emerald-600
+  'oxymed': '#059669',
   'спорт': '#14b8a6',    // teal-500
   'health': '#10b981',
   'образование': '#8b5cf6', // violet-500
   'книги': '#a855f7',    // purple-500
   'education': '#8b5cf6',
   'покупки': '#f97316',  // orange-500
+  'uzum market': '#7c3aed',
+  'uzum': '#7c3aed',
+  'узум': '#7c3aed',
   'одежда': '#ea580c',
   'shopping': '#f97316',
   'подписки': '#06b6d4', // cyan-500
   'сервисы': '#0891b2',
+  'payme': '#00bcd4',
+  'click': '#0284c7',
+  'связь': '#06b6d4',
+  'ucell': '#9333ea',
+  'beeline': '#eab308',
+  'mobiuz': '#dc2626',
   'subscriptions': '#06b6d4',
   'техника': '#3b82f6',  // blue-500
   'зарплата': '#22c55e', // green-500
+  'доход': '#22c55e',
+  'гонорар': '#10b981',
   'инвестиции': '#10b981', // emerald-500
+  'капиталбанк': '#2563eb',
+  'анорбанк': '#ec4899',
+  'uzcard': '#3b82f6',
+  'humo': '#f97316',
   'другое': '#64748b',   // slate-500
   'other': '#64748b',
 };

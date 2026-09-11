@@ -75,11 +75,15 @@ export class WebSocketClient {
     // Terminate existing socket if any
     this.closeSocket();
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = process.env.NEXT_PUBLIC_WS_URL
-      ? process.env.NEXT_PUBLIC_WS_URL.replace(/^(wss?:\/\/)/, '')
-      : window.location.host;
-    const wsUrl = `${protocol}//${host}/v1/ws?token=${encodeURIComponent(this.token)}`;
+    let wsUrl: string;
+    if (process.env.NEXT_PUBLIC_WS_URL) {
+      const baseWs = process.env.NEXT_PUBLIC_WS_URL.replace(/\/$/, '');
+      const fullWs = baseWs.endsWith('/v1/ws') ? baseWs : `${baseWs}/v1/ws`;
+      wsUrl = `${fullWs}?token=${encodeURIComponent(this.token)}`;
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      wsUrl = `${protocol}//${window.location.host}/v1/ws?token=${encodeURIComponent(this.token)}`;
+    }
 
     try {
       this.ws = new WebSocket(wsUrl);

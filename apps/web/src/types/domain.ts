@@ -155,6 +155,8 @@ export interface Task {
   sort_order?: number;
   /** Estimated time in minutes */
   estimated_duration_minutes?: number | null;
+  /** Convenience estimate in minutes */
+  estimate_minutes?: number | null;
   /** Actual spent time in minutes */
   actual_duration_minutes?: number | null;
   /** Completion timestamp (ISO 8601 UTC) */
@@ -177,22 +179,30 @@ export interface Project {
   id: string;
   /** Tenant isolation identifier */
   workspace_id: string;
+  /** Optional parent goal */
+  goal_id?: string | null;
   /** Project display name */
   name: string;
   /** Project description / goals */
-  description?: string;
+  description?: string | null;
   /** Color code for badges and calendar highlights (Hex/HSL) */
   color: string;
+  /** Project icon identifier */
+  icon?: string | null;
   /** Target completion deadline */
   target_date?: string | null;
   /** Project lifecycle state */
-  status: 'active' | 'paused' | 'completed' | 'archived';
+  status: 'active' | 'paused' | 'completed' | 'archived' | string;
   /** Computed completion percentage (0-100) */
-  progress_percent: number;
+  progress_percent?: number;
   /** Dedicated financial budget limit in minor units (e.g. cents) */
   budget_limit_minor?: number | null;
   /** Currency code (e.g. RUB, USD) */
   currency?: string;
+  /** GitHub repository name (owner/repo) if linked */
+  github_repo?: string | null;
+  /** GitHub default branch (e.g. main/master) */
+  github_default_branch?: string | null;
   /** Optimistic concurrency version */
   version?: number;
   /** Creation timestamp (ISO 8601 UTC) */
@@ -255,13 +265,21 @@ export interface TimeBlock {
   /** Tenant isolation identifier */
   workspace_id?: string;
   /** Associated task reference */
-  task_id: string;
+  task_id?: string | null;
   /** Block start time in ISO 8601 UTC */
-  start_time: string;
+  start_time?: string;
   /** Block end time in ISO 8601 UTC */
-  end_time: string;
+  end_time?: string;
+  /** Starts at alias */
+  starts_at: string;
+  /** Ends at alias */
+  ends_at: string;
+  /** Custom label */
+  label?: string | null;
   /** If true, AI auto-rescheduler will not move this block */
   is_locked?: boolean;
+  /** Fixed timeblock flag */
+  is_fixed?: boolean;
   /** Creation timestamp (ISO 8601 UTC) */
   created_at?: string;
   /** Last update timestamp (ISO 8601 UTC) */
@@ -344,9 +362,13 @@ export interface Transaction {
   /** Transaction note / description */
   description: string;
   /** Transaction occurrence date (ISO 8601 or YYYY-MM-DD) */
-  transaction_date: string;
+  transaction_date?: string;
+  /** Server timestamp of occurrence */
+  occurred_at?: string;
   /** Convenience UI alias for transaction_date */
   date?: string;
+  /** Note alias for description */
+  note?: string;
   /** Reconciliation status with bank statement */
   is_cleared?: boolean;
   /** Optimistic concurrency version */
@@ -608,6 +630,10 @@ export interface PaginationMeta {
   has_more: boolean;
   /** Cursor token to pass into next request */
   next_cursor: string | null;
+  /** Optional previous page cursor token */
+  prev_cursor?: string | null;
+  /** Total record count if available */
+  total_count?: number;
   /** Approximate total record count if available */
   total_count_approx?: number;
 }
@@ -662,15 +688,27 @@ export interface UnreadCountResponse {
   unread_count: number;
 }
 
-// ============================================================================
-// INTEGRATIONS DOMAIN
-// ============================================================================
-
 export interface IntegrationStatus {
-  provider: 'google_calendar' | 'telegram' | string;
+  provider: 'google_calendar' | 'telegram' | 'github' | string;
   status: 'connected' | 'disconnected' | 'syncing' | 'error';
   last_sync: string | null;
   error_message?: string | null;
   metadata?: Record<string, unknown>;
+}
+
+// ============================================================================
+// PROJECTS DOMAIN
+// ============================================================================
+
+export interface ProjectCreateInput {
+  name: string;
+  description?: string | null;
+  goal_id?: string | null;
+  color?: string;
+  icon?: string | null;
+  status?: string;
+  target_date?: string | null;
+  github_repo?: string | null;
+  github_default_branch?: string | null;
 }
 

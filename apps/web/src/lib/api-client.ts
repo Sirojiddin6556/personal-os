@@ -110,8 +110,10 @@ export interface ApiRequestOptions<TBody = unknown> {
 /**
  * Base URL for the Core REST API.
  */
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || '/v1';
+export const API_BASE_URL = (() => {
+  const envUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, '') || 'http://localhost:8008/v1';
+  return envUrl.endsWith('/v1') ? envUrl : `${envUrl}/v1`;
+})();
 
 /**
  * Helper to retrieve stored auth token in browser or SSR environment.
@@ -313,7 +315,7 @@ export async function fetchPaginated<TItem>(
 ): Promise<PaginatedResponse<TItem>> {
   const { cursor, limit = 50, filters = {}, signal } = options;
 
-  return apiRequest<PaginatedResponse<TItem>>('GET', path, {
+  const raw = await apiRequest<any>('GET', path, {
     params: {
       ...filters,
       cursor: cursor || undefined,
@@ -321,4 +323,31 @@ export async function fetchPaginated<TItem>(
     },
     signal,
   });
+
+  if (raw && typeof raw === 'object') {
+    const items: TItem[] = Array.isArray(raw.items) ? raw.items : Array.isArray(raw) ? raw : [];
+    const hasMore = Boolean(raw.has_more ?? raw.pagination?.has_more ?? false);
+    const nextCursor = (raw.next_cursor ?? raw.pagination?.next_cursor ?? null) as string | null;
+    const prevCursor = (raw.prev_cursor ?? raw.pagination?.prev_cursor ?? null) as string | null;
+    const totalCount = (raw.total_count ?? raw.pagination?.total_count) as number | undefined;
+
+    return {
+      items,
+      pagination: {
+        has_more: hasMore,
+        next_cursor: nextCursor,
+        prev_cursor: prevCursor,
+        total_count: totalCount,
+      },
+    };
+  }
+
+  return {
+    items: [],
+    pagination: {
+      has_more: false,
+      next_cursor: null,
+      prev_cursor: null,
+    },
+  };
 }

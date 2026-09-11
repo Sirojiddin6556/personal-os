@@ -1,7 +1,9 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useTasks } from '@/hooks/useTasks';
+import { useProjects } from '@/hooks/useGitHub';
 import { useUIStore } from '@/stores/ui-store';
 import { KanbanBoard } from '@/components/domain/tasks/KanbanBoard';
 import { TaskCard } from '@/components/domain/tasks/TaskCard';
@@ -9,13 +11,25 @@ import { TaskPriority, TaskStatus } from '@/types/domain';
 import { cn } from '@/lib/utils';
 
 export default function TasksPage() {
+  const searchParams = useSearchParams();
+  const urlProject = searchParams?.get('project') || 'all';
+
   const [view, setView] = useState<'kanban' | 'list'>('kanban');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
-  const [projectFilter, setProjectFilter] = useState<string>('all');
+  const [projectFilter, setProjectFilter] = useState<string>(urlProject);
   const [searchQuery, setSearchQuery] = useState('');
 
-  const { tasks, moveTask, completeTask } = useTasks({
+  const { data: dbProjects = [] } = useProjects();
+
+  useEffect(() => {
+    const p = searchParams?.get('project');
+    if (p) {
+      setProjectFilter(p);
+    }
+  }, [searchParams]);
+
+  const { tasks, moveTask, completeTask, deleteTask } = useTasks({
     status: statusFilter,
     priority: priorityFilter,
     project: projectFilter,
@@ -154,6 +168,13 @@ export default function TasksPage() {
           <option value="personal">#personal</option>
           <option value="infra">#infra</option>
           <option value="frontend">#frontend</option>
+          {dbProjects
+            .filter((p) => !['work', 'personal', 'infra', 'frontend'].includes(p.name.toLowerCase()))
+            .map((p) => (
+              <option key={p.id} value={p.name}>
+                #{p.name}
+              </option>
+            ))}
         </select>
 
         {/* Status Filter (especially useful for List view) */}
@@ -199,6 +220,7 @@ export default function TasksPage() {
             onMoveTask={handleMove}
             onCompleteTask={completeTask}
             onEditTask={handleEdit}
+            onDeleteTask={deleteTask}
           />
         ) : (
           /* List View with Infinite Scroll Pattern */
@@ -219,6 +241,7 @@ export default function TasksPage() {
                   task={task}
                   onComplete={completeTask}
                   onEdit={handleEdit}
+                  onDelete={deleteTask}
                 />
               ))
             )}

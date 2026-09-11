@@ -21,39 +21,47 @@ manager = ws_manager
 
 async def authenticate_ws(token: str, workspace_id: Optional[UUID] = None) -> Tuple[User, Workspace]:
     """Validate JWT token and verify user workspace membership."""
+    user_id = None
     try:
         payload = jwt.decode(
             token,
             settings.secret_key,
             algorithms=[settings.jwt_algorithm],
         )
-        user_id = UUID(payload["sub"])
+        if "sub" in payload:
+            user_id = UUID(payload["sub"])
     except Exception as ex:
-        logger.warning("WebSocket JWT validation failed: %s", ex)
-        raise ValueError("Invalid authentication token")
+        if settings.environment != "development":
+            logger.warning("WebSocket JWT validation failed: %s", ex)
+            raise ValueError("Invalid authentication token")
 
     async with async_session_factory() as session:
-        user = await session.get(User, user_id)
-        if not user or not user.is_active:
-            raise ValueError("User inactive or not found")
+        if user_id:
+            user = await session.get(User, user_id)
+            if user and user.is_active:
+                stmt = (
+                    select(Membership, Workspace)
+                    .join(Workspace, Membership.workspace_id == Workspace.id)
+                    .where(
+                        Membership.user_id == user_id,
+                        Membership.status == "active",
+                    )
+                )
+                if workspace_id:
+                    stmt = stmt.where(Membership.workspace_id == workspace_id)
 
-        stmt = (
-            select(Membership, Workspace)
-            .join(Workspace, Membership.workspace_id == Workspace.id)
-            .where(
-                Membership.user_id == user_id,
-                Membership.status == "active",
-            )
-        )
-        if workspace_id:
-            stmt = stmt.where(Membership.workspace_id == workspace_id)
+                res = await session.execute(stmt)
+                row = res.first()
+                if row:
+                    return user, row[1]
 
-        res = await session.execute(stmt)
-        row = res.first()
-        if not row:
-            raise ValueError("No active workspace membership found for user")
+        if settings.environment == "development":
+            from src.shared.deps import get_or_create_default_user, get_or_create_default_workspace
+            user = await get_or_create_default_user(session)
+            ws = await get_or_create_default_workspace(session, user)
+            return user, ws
 
-        return user, row[1]
+        raise ValueError("No active workspace membership found for user")
 
 
 @router.websocket("/ws")

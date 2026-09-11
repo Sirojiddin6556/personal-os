@@ -97,7 +97,9 @@ def upgrade() -> None:
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
+    """)
 
+    op.execute("""
         CREATE TRIGGER trg_prevent_posted_mutation
         BEFORE UPDATE OR DELETE ON transactions
         FOR EACH ROW EXECUTE FUNCTION prevent_posted_mutation();
@@ -128,7 +130,9 @@ def upgrade() -> None:
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
+    """)
 
+    op.execute("""
         CREATE TRIGGER trg_validate_note_chunk_workspace
         BEFORE INSERT OR UPDATE ON note_chunks
         FOR EACH ROW EXECUTE FUNCTION validate_note_chunk_workspace();

@@ -44,6 +44,8 @@ class Project(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
     icon: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, default="active", nullable=False)
     target_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    github_repo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    github_default_branch: Mapped[Optional[str]] = mapped_column(Text, nullable=True, default="main")
 
     # Relationships
     goal: Mapped[Optional["Goal"]] = relationship("Goal", back_populates="projects")

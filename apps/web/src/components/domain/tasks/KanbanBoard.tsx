@@ -23,6 +23,7 @@ export interface KanbanBoardProps {
   onMoveTask: (taskId: string, targetStatus: TaskStatus, newIndex?: number) => void;
   onCompleteTask: (id: string) => void;
   onEditTask: (id: string) => void;
+  onDeleteTask?: (id: string) => void;
 }
 
 export const KANBAN_COLUMNS: { id: TaskStatus; title: string; dotColor: string }[] = [
@@ -39,6 +40,7 @@ export function KanbanBoard({
   onMoveTask,
   onCompleteTask,
   onEditTask,
+  onDeleteTask,
 }: KanbanBoardProps) {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
   const { openQuickAdd } = useUIStore();
@@ -106,6 +108,7 @@ export function KanbanBoard({
             onAddTask={() => openQuickAdd('task')}
             onCompleteTask={onCompleteTask}
             onEditTask={onEditTask}
+            onDeleteTask={onDeleteTask}
           />
         ))}
       </div>
@@ -118,6 +121,7 @@ export function KanbanBoard({
               task={activeTask}
               onComplete={onCompleteTask}
               onEdit={onEditTask}
+              onDelete={onDeleteTask}
               isDragging
             />
           </div>

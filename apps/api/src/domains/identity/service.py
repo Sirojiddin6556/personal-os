@@ -113,6 +113,7 @@ class IdentityService:
             workspace_id=workspace.id,
             data={"email": user.email, "full_name": user.full_name},
         )
+        await session.commit()
         return user
 
     async def authenticate(self, session: AsyncSession, data: UserLoginRequest) -> TokenResponse:
@@ -171,6 +172,7 @@ class IdentityService:
             workspace_id=workspace.id,
             data={"name": workspace.name, "slug": workspace.slug},
         )
+        await session.commit()
         return workspace
 
     async def list_user_workspaces(self, session: AsyncSession, user: User) -> List[Workspace]:

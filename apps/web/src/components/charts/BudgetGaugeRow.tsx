@@ -22,7 +22,7 @@ export function BudgetGaugeRow({
 }: BudgetGaugeRowProps) {
   const spentMinor = budget.spent_minor ?? budget.current_spent_minor ?? 0;
   const limitMinor = budget.limit_minor ?? 1;
-  const currency = budget.currency || 'RUB';
+  const currency = budget.currency || 'UZS';
   const categoryName = budget.category_name || budget.category_id || 'Общие расходы';
 
   const percent = limitMinor > 0 ? Math.round((spentMinor / limitMinor) * 100) : 0;

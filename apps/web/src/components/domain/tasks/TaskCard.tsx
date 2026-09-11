@@ -10,6 +10,7 @@ export interface TaskCardProps {
   task: Task;
   onComplete: (id: string) => void;
   onEdit: (id: string) => void;
+  onDelete?: (id: string) => void;
   isDragging?: boolean;
 }
 
@@ -17,6 +18,7 @@ export function TaskCard({
   task,
   onComplete,
   onEdit,
+  onDelete,
   isDragging: isCustomDragging,
 }: TaskCardProps) {
   const {
@@ -109,15 +111,36 @@ export function TaskCard({
           )}
         </div>
 
-        {/* Priority Badge */}
-        <span
-          className={cn(
-            'inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase shrink-0',
-            priorityClass
+        <div className="flex items-center gap-1.5 shrink-0">
+          {/* Priority Badge */}
+          <span
+            className={cn(
+              'inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase shrink-0',
+              priorityClass
+            )}
+          >
+            !{task.priority}
+          </span>
+
+          {/* Delete Button */}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(task.id);
+              }}
+              aria-label={`Удалить задачу ${task.title}`}
+              title="Удалить задачу"
+              className="p-1 -mr-1 text-text-muted hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+            </button>
           )}
-        >
-          !{task.priority}
-        </span>
+        </div>
       </div>
 
 

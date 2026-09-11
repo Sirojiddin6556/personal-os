@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { QueryClientProvider } from '@tanstack/react-query';
-import { queryClient } from '@/lib/query-client';
+import { QueryProvider } from '@/components/providers/QueryProvider';
 import { WebSocketProvider } from '@/components/providers/WebSocketProvider';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import '@/styles/globals.css';
@@ -27,11 +26,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <ThemeProvider>
-          <QueryClientProvider client={queryClient}>
+          <QueryProvider>
             <WebSocketProvider>
               {children}
             </WebSocketProvider>
-          </QueryClientProvider>
+          </QueryProvider>
         </ThemeProvider>
       </body>
     </html>

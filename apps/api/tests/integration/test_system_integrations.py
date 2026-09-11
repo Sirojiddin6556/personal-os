@@ -1,4 +1,4 @@
-﻿"""Integration tests for Personal OS cross-boundary and cross-component flows."""
+"""Integration tests for Personal OS cross-boundary and cross-component flows."""
 
 from datetime import datetime, timezone
 import json
@@ -150,7 +150,7 @@ async def test_integration_telegram_webhook_deduplication_and_crypto():
     assert decrypted_comb == raw_token
     
     # 2. Telegram update deduplication
-    update_id = 987654321
+    update_id = f"test-tg-{uuid4()}"
     first_seen = await deduplicate_telegram_update(update_id)
     assert first_seen is True  # First time: allowed
     
