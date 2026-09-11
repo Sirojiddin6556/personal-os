@@ -1,11 +1,10 @@
-# Node.js
-node_modules/
-.next/
-out/
-build/
-dist/
-*.tsbuildinfo
-next-env.d.ts
+# Env
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production
+.env.production.local
 
 # Python
 __pycache__/
@@ -15,9 +14,30 @@ __pycache__/
 .venv/
 venv/
 ENV/
+uv.lock
+*.egg-info/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Node
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # Logs
 logs/
@@ -27,17 +47,5 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Environment & Secrets
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# IDE & OS
-.idea/
-.vscode/
-*.swp
-*.swo
-.DS_Store
-Thumbs.db
+# Alembic
+alembic/versions/__pycache__/
