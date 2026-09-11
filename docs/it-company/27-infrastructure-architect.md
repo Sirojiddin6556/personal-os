@@ -51,6 +51,7 @@ ACTIONS:
 CHANGED_FILES:
 - infra/docker/docker-compose.yml
 - infra/docker/docker-compose.observability.yml
+- infra/docker/Dockerfile.worker
 - infra/observability/prometheus.yml
 - apps/api/Dockerfile
 - apps/api/Dockerfile.worker
