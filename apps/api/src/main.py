@@ -123,6 +123,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router, prefix=v1_prefix)
     app.include_router(google_router, prefix=v1_prefix)
     app.include_router(telegram_router, prefix=v1_prefix)
+    app.include_router(telegram_router)  # Support root webhook URLs from Telegram Bot API
     app.include_router(ws_router, prefix=v1_prefix)
 
     return app

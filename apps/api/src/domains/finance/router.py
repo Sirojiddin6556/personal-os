@@ -15,6 +15,7 @@ from src.domains.finance.schemas import (
     CategoryResponse,
     TransactionCreate,
     TransactionResponse,
+    TransactionUpdate,
 )
 from src.domains.finance.service import finance_service
 from src.domains.identity.models import Workspace
@@ -83,7 +84,7 @@ async def list_transactions(
     return [TransactionResponse.model_validate(t) for t in transactions]
 
 
-@router.post("/transactions/{transaction_id}/reverse", response_model=TransactionResponse)
+@router.post("/transactions/{transaction_id}/reverse", response_model=TransactionResponse, status_code=status.HTTP_201_CREATED)
 async def reverse_transaction(
     transaction_id: UUID,
     reason: Optional[str] = Query(None),
@@ -92,6 +93,17 @@ async def reverse_transaction(
 ) -> TransactionResponse:
     reversal = await finance_service.reverse_transaction(session, workspace.id, transaction_id, reason)
     return TransactionResponse.model_validate(reversal)
+
+
+@router.patch("/transactions/{transaction_id}", response_model=TransactionResponse)
+async def update_transaction(
+    transaction_id: UUID,
+    body: TransactionUpdate,
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> TransactionResponse:
+    tx = await finance_service.update_transaction(session, workspace.id, transaction_id, body)
+    return TransactionResponse.model_validate(tx)
 
 
 @router.post("/budgets", response_model=BudgetResponse, status_code=status.HTTP_201_CREATED)

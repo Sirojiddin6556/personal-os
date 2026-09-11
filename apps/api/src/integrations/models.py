@@ -1,10 +1,10 @@
-"""SQLAlchemy models for Integrations, Sync States, External Mappings and Inbox Quick Capture."""
+"""SQLAlchemy models for Integrations, OAuth Credentials, Webhook Subscriptions, Sync States, and External Mappings."""
 
 from datetime import datetime
 from typing import Any, Dict, Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Text
+from sqlalchemy import ForeignKey, Integer, LargeBinary, Text
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,6 +23,27 @@ class Integration(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
     sync_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
+class OAuthCredential(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
+    """AES-256-GCM encrypted external service OAuth credentials."""
+
+    __tablename__ = "oauth_credentials"
+
+    integration_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("integrations.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    encrypted_access_token: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    iv_access: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    tag_access: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    encrypted_refresh_token: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    iv_refresh: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    tag_refresh: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    token_expires_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    key_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+
+
 class ExternalMapping(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
     """Bi-directional mapping between local entity UUIDs and foreign provider IDs."""
 
@@ -38,6 +59,32 @@ class ExternalMapping(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
     external_id: Mapped[str] = mapped_column(Text, nullable=False)
     sync_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     last_synced_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+
+    @property
+    def local_id(self) -> UUID:
+        """Alias for internal_id used by sync adapters."""
+        return self.internal_id
+
+    @local_id.setter
+    def local_id(self, value: UUID) -> None:
+        self.internal_id = value
+
+
+class WebhookSubscription(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
+    """External webhook push notification channel registrations."""
+
+    __tablename__ = "webhook_subscriptions"
+
+    integration_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("integrations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    external_channel_id: Mapped[str] = mapped_column(Text, nullable=False)
+    external_resource_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    client_token: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
 
 
 class SyncState(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):

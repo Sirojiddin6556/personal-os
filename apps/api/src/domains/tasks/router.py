@@ -22,6 +22,12 @@ kanban_router = APIRouter(prefix="/kanban", tags=["kanban"])
 
 
 @router.post(
+    "",
+    response_model=TaskResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new task with Idempotency-Key",
+)
+@router.post(
     "/",
     response_model=TaskResponse,
     status_code=status.HTTP_201_CREATED,
@@ -44,6 +50,11 @@ async def create_task(
     return created
 
 
+@router.get(
+    "",
+    response_model=CursorPage[TaskResponse],
+    summary="List workspace tasks with cursor pagination and filters",
+)
 @router.get(
     "/",
     response_model=CursorPage[TaskResponse],

@@ -1,26 +1,83 @@
-"""Telegram webhook router."""
+"""Telegram webhook router with fast ACK, constant-time secret verification, and Redis deduplication."""
 
-from typing import Any, Dict
-from fastapi import APIRouter, Depends, Header, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
+import hmac
+import logging
+import time
+from typing import Any, Dict, Optional
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, status
 
 from src.config import settings
-from src.db.session import get_db_session
-from src.integrations.telegram.handler import telegram_handler
+from src.integrations.telegram.handler import handle_telegram_update
 
-router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/webhooks/telegram", tags=["telegram"])
+
+_TELEGRAM_DEDUP_CACHE: Dict[str, float] = {}
 
 
-@router.post("/telegram", status_code=status.HTTP_200_OK)
+async def deduplicate_telegram_update(update_id: str, ttl_seconds: int = 86400) -> bool:
+    """Idempotency deduplication using Redis SETNX with fallback memory cache.
+
+    Returns True if update_id is new, False if it is a duplicate.
+    """
+    key = f"tg:dedup:{update_id}"
+
+    # 1. Try Redis SETNX
+    try:
+        from src.shared.idempotency import idempotency_service
+
+        client = await idempotency_service.get_client()
+        if client:
+            # redis.set(..., nx=True, ex=...) returns True on success, None/False if key exists
+            set_success = await client.set(key, "1", nx=True, ex=ttl_seconds)
+            return bool(set_success)
+    except Exception as ex:
+        logger.warning("Redis deduplication failed (%s). Using fallback memory cache.", ex)
+
+    # 2. In-memory cache fallback (single-process / dev / testing)
+    now = time.time()
+    for k in list(_TELEGRAM_DEDUP_CACHE.keys()):
+        if _TELEGRAM_DEDUP_CACHE[k] < now:
+            _TELEGRAM_DEDUP_CACHE.pop(k, None)
+
+    if key in _TELEGRAM_DEDUP_CACHE:
+        return False
+
+    _TELEGRAM_DEDUP_CACHE[key] = now + ttl_seconds
+    return True
+
+
+@router.post("/{bot_token}")
+@router.post("")
+@router.post("/")
 async def telegram_webhook(
-    update: Dict[str, Any],
-    x_telegram_bot_api_secret_token: str | None = Header(None, alias="X-Telegram-Bot-Api-Secret-Token"),
-    session: AsyncSession = Depends(get_db_session),
-) -> Dict[str, str]:
-    """Ingest Telegram updates sent by the Telegram Bot API webhook."""
-    # Validate secret token if configured
-    if settings.telegram_webhook_secret and x_telegram_bot_api_secret_token != settings.telegram_webhook_secret:
-        raise HTTPException(status_code=403, detail="Invalid Telegram secret token")
+    request: Request,
+    background_tasks: BackgroundTasks,
+    bot_token: Optional[str] = None,
+) -> Dict[str, bool]:
+    """Ingest Telegram updates with Fast ACK (<500ms), header verification, deduplication, and async dispatch."""
+    # 1. Verify secret token header with constant-time comparison
+    expected_secret = settings.telegram_webhook_secret or "personal_os_telegram_secret"
+    secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not secret or not hmac.compare_digest(secret, expected_secret):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid Telegram secret token",
+        )
 
-    await telegram_handler.handle_update(session, update)
-    return {"status": "ok"}
+    # 2. Fast ACK Telegram immediately (<500ms SLA)
+    update = await request.json()
+
+    # 3. Dedupe: Redis SETNX update_id (TTL 24h)
+    update_id = str(update.get("update_id", ""))
+    if update_id:
+        is_new = await deduplicate_telegram_update(update_id)
+        if not is_new:
+            # Duplicate update acknowledged without re-processing
+            return {"ok": True}
+
+    # 4. Background task: handle_update
+    background_tasks.add_task(handle_telegram_update, update)
+    return {"ok": True}

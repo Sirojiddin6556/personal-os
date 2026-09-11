@@ -59,6 +59,39 @@ class NotificationService:
 
         return notif
 
+    async def create_reminder(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        data: Any,
+    ) -> Notification:
+        """Create a reminder notification from integration data (e.g. Telegram or AI Gateway)."""
+        from src.domains.identity.models import Membership
+
+        if isinstance(data, dict):
+            title = data.get("title") or "Напоминание"
+            body_text = data.get("body") or data.get("description") or title
+            user_id = data.get("user_id")
+        else:
+            title = getattr(data, "title", "Напоминание")
+            body_text = getattr(data, "body", title)
+            user_id = getattr(data, "user_id", None)
+
+        if not user_id:
+            stmt = select(Membership.user_id).where(Membership.workspace_id == workspace_id).limit(1)
+            res = await session.execute(stmt)
+            user_id = res.scalar_one_or_none() or uuid4()
+
+        notif_create = NotificationCreate(
+            user_id=user_id,
+            title=title,
+            body=body_text,
+            channel="telegram",
+            priority="high",
+        )
+        return await self.create_notification(session, workspace_id, notif_create)
+
+
     async def list_notifications(
         self,
         session: AsyncSession,

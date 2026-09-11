@@ -236,7 +236,10 @@ class TaskService:
         )
 
         if filter_status:
-            stmt = stmt.where(Task.status == filter_status)
+            if isinstance(filter_status, (list, tuple, set)):
+                stmt = stmt.where(Task.status.in_(filter_status))
+            else:
+                stmt = stmt.where(Task.status == filter_status)
         if filter_project:
             stmt = stmt.where(Task.project_id == filter_project)
         if filter_priority:

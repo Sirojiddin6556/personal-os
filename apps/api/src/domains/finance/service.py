@@ -13,6 +13,7 @@ from src.domains.finance.schemas import (
     BudgetCreate,
     CategoryCreate,
     TransactionCreate,
+    TransactionUpdate,
 )
 from src.shared.exceptions import ConflictError, NotFoundError, ValidationDomainError
 from src.shared.idempotency import idempotency_service
@@ -321,6 +322,38 @@ class FinanceService:
         stmt = select(Budget).where(Budget.workspace_id == workspace_id).order_by(Budget.name.asc())
         res = await session.execute(stmt)
         return list(res.scalars().all())
+
+    async def update_transaction(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        transaction_id: UUID,
+        body: TransactionUpdate,
+    ) -> Transaction:
+        """Update draft transaction or reject mutation for posted/reversed transactions."""
+        stmt = select(Transaction).where(
+            Transaction.id == transaction_id,
+            Transaction.workspace_id == workspace_id,
+        )
+        res = await session.execute(stmt)
+        tx = res.scalar_one_or_none()
+        if not tx:
+            raise NotFoundError(resource="Transaction", identifier=transaction_id)
+
+        if tx.status in ("posted", "reversed"):
+            raise ConflictError(
+                title="Immutable Transaction",
+                detail=f"Cannot modify a {tx.status} transaction (id={transaction_id}). Create a reversal instead.",
+            )
+
+        if body.note or body.description:
+            tx.note = body.note or body.description
+        if body.category_id is not None:
+            tx.category_id = body.category_id
+
+        await session.commit()
+        await session.refresh(tx)
+        return tx
 
 
 finance_service = FinanceService()

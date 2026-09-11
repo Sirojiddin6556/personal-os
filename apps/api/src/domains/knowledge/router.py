@@ -69,4 +69,4 @@ async def search_notes(
     session: AsyncSession = Depends(get_db_session),
     workspace: Workspace = Depends(get_workspace),
 ) -> List[NoteSearchResult]:
-    return await knowledge_service.search_notes(session, workspace.id, q, limit)
+    return await knowledge_service.search_fts(session, workspace.id, q, limit)

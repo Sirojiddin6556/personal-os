@@ -174,5 +174,38 @@ class CalendarService:
 
         return FreeBusyResponse(free_windows=free_windows, busy_windows=busy_windows)
 
+    async def get_events_for_day(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        day: str,
+    ) -> List[dict]:
+        """Fetch all events for a given calendar day (YYYY-MM-DD or datetime) as dictionary items."""
+        if isinstance(day, str):
+            clean_date = day.split("T")[0] if "T" in day else day
+            parsed_date = datetime.strptime(clean_date, "%Y-%m-%d").date()
+        elif isinstance(day, datetime):
+            parsed_date = day.date()
+        else:
+            parsed_date = day
+
+        start_dt = datetime.combine(parsed_date, datetime.min.time(), tzinfo=timezone.utc)
+        end_dt = datetime.combine(parsed_date, datetime.max.time(), tzinfo=timezone.utc)
+
+        events = await self.list_events(session, workspace_id, start_dt, end_dt)
+        return [
+            {
+                "id": str(ev.id),
+                "title": ev.title,
+                "description": ev.description,
+                "starts_at": ev.starts_at.isoformat() if ev.starts_at else None,
+                "ends_at": ev.ends_at.isoformat() if ev.ends_at else None,
+                "is_all_day": ev.is_all_day,
+                "location": ev.location,
+                "status": ev.status,
+            }
+            for ev in events
+        ]
+
 
 calendar_service = CalendarService()

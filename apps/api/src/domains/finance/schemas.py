@@ -91,6 +91,12 @@ class TransactionCreate(BaseModel):
         return self
 
 
+class TransactionUpdate(BaseModel):
+    note: Optional[str] = None
+    description: Optional[str] = None
+    category_id: Optional[UUID] = None
+
+
 class TransactionResponse(BaseModel):
     id: UUID
     workspace_id: UUID
