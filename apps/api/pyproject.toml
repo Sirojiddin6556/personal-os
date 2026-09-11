@@ -1,0 +1,22 @@
+[project]
+name = "personal-os-api"
+version = "0.1.0"
+description = "Personal OS Core API"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.13.0",
+    "asyncpg>=0.29.0",
+    "celery>=5.3.0",
+    "fastapi>=0.110.0",
+    "httpx>=0.27.0",
+    "pgvector>=0.2.5",
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+    "redis>=5.0.0",
+    "sqlalchemy>=2.0.28",
+    "uvicorn[standard]>=0.28.0",
+]
+
+[tool.uv]
+package = false

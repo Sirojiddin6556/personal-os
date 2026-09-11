@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'personal-os-api'
+    static_configs:
+      - targets: ['api:8000']
+    metrics_path: '/metrics'
+  - job_name: 'celery-worker'
+    static_configs:
+      - targets: ['worker:9080']
+  - job_name: 'postgres-exporter'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+  - job_name: 'redis-exporter'
+    static_configs:
+      - targets: ['redis-exporter:9121']
