@@ -1,31 +1,26 @@
-"""WebSocket endpoint for real-time domain event streaming."""
+"""WebSocket router for live multi-tenant push notifications and synchronization."""
 
-import json
 import logging
+from typing import Optional, Tuple
 from uuid import UUID
 
 import jwt
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
 
 from src.config import settings
 from src.db.session import async_session_factory
-from src.domains.identity.models import Membership
+from src.domains.identity.models import Membership, User, Workspace
 from src.ws.manager import ws_manager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["websocket"])
+manager = ws_manager
 
 
-@router.websocket("/ws")
-async def websocket_endpoint(
-    websocket: WebSocket,
-    token: str = Query(..., description="JWT Bearer token"),
-    workspace_id: UUID = Query(..., description="Target workspace ID"),
-):
-    """Authenticate and connect client to real-time tenant event stream."""
-    # 1. Validate JWT Token
+async def authenticate_ws(token: str, workspace_id: Optional[UUID] = None) -> Tuple[User, Workspace]:
+    """Validate JWT token and verify user workspace membership."""
     try:
         payload = jwt.decode(
             token,
@@ -34,40 +29,64 @@ async def websocket_endpoint(
         )
         user_id = UUID(payload["sub"])
     except Exception as ex:
+        logger.warning("WebSocket JWT validation failed: %s", ex)
+        raise ValueError("Invalid authentication token")
+
+    async with async_session_factory() as session:
+        user = await session.get(User, user_id)
+        if not user or not user.is_active:
+            raise ValueError("User inactive or not found")
+
+        stmt = (
+            select(Membership, Workspace)
+            .join(Workspace, Membership.workspace_id == Workspace.id)
+            .where(
+                Membership.user_id == user_id,
+                Membership.status == "active",
+            )
+        )
+        if workspace_id:
+            stmt = stmt.where(Membership.workspace_id == workspace_id)
+
+        res = await session.execute(stmt)
+        row = res.first()
+        if not row:
+            raise ValueError("No active workspace membership found for user")
+
+        return user, row[1]
+
+
+@router.websocket("/ws")
+@router.websocket("/v1/ws")
+async def websocket_endpoint(
+    websocket: WebSocket,
+    token: str = Query(..., description="JWT Bearer token"),
+    workspace_id: Optional[UUID] = Query(None, description="Optional target workspace ID"),
+):
+    """Real-time bi-directional WebSocket connection for tenant events."""
+    try:
+        user, workspace = await authenticate_ws(token, workspace_id)
+    except Exception as ex:
         logger.warning("WebSocket authentication failed: %s", ex)
-        await websocket.close(code=4001, reason="Unauthorized")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Unauthorized")
         return
 
-    # 2. Verify workspace membership
-    async with async_session_factory() as session:
-        stmt = select(Membership).where(
-            Membership.workspace_id == workspace_id,
-            Membership.user_id == user_id,
-            Membership.status == "active",
-        )
-        res = await session.execute(stmt)
-        if not res.scalar_one_or_none():
-            logger.warning("User %s has no active membership in workspace %s", user_id, workspace_id)
-            await websocket.close(code=4003, reason="Forbidden")
-            return
-
-    # 3. Connect and loop
-    await ws_manager.connect(websocket, workspace_id)
+    await manager.connect(websocket, workspace.id)
     try:
-        await ws_manager.send_personal_message(
+        await manager.send_personal_message(
             websocket,
-            {"type": "connected", "workspace_id": str(workspace_id), "user_id": str(user_id)},
+            {
+                "type": "connected",
+                "workspace_id": str(workspace.id),
+                "user_id": str(user.id),
+            },
         )
         while True:
-            data_text = await websocket.receive_text()
-            try:
-                msg = json.loads(data_text)
-                if msg.get("type") == "ping":
-                    await websocket.send_text(json.dumps({"type": "pong"}))
-            except Exception:
-                pass
+            data = await websocket.receive_json()
+            if data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
     except WebSocketDisconnect:
-        ws_manager.disconnect(websocket, workspace_id)
+        manager.disconnect(websocket, workspace.id)
     except Exception as ex:
         logger.error("WebSocket runtime error: %s", ex)
-        ws_manager.disconnect(websocket, workspace_id)
+        manager.disconnect(websocket, workspace.id)

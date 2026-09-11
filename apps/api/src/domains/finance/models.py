@@ -1,12 +1,20 @@
 """SQLAlchemy models for Finance: Accounts, Categories, Immutable Transactions and Budgets."""
 
 from datetime import date, datetime
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import BigInteger, Boolean, Date, ForeignKey, String, Text
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Date,
+    ForeignKey,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID as PGUUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, synonym
 
 from src.db.base import Base, TimestampMixin, UUIDMixin, WorkspaceMixin
 
@@ -17,11 +25,27 @@ class Account(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
     __tablename__ = "accounts"
 
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    type: Mapped[str] = mapped_column(Text, default="checking", nullable=False)
-    currency: Mapped[str] = mapped_column(String(3), default="RUB", nullable=False)
+    currency: Mapped[str] = mapped_column(Text, nullable=False)  # ISO 4217
+    balance_minor: Mapped[int] = mapped_column(
+        "current_balance_minor", BigInteger, nullable=False, default=0
+    )  # cents
+    account_type: Mapped[str] = mapped_column(
+        "type", Text, nullable=False, default="checking"
+    )  # cash/card/crypto
     initial_balance_minor: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
-    current_balance_minor: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
-    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    # Aliases / Synonyms for backward compatibility
+    current_balance_minor = synonym("balance_minor")
+    type = synonym("account_type")
+
+    __table_args__ = (
+        CheckConstraint(
+            "type IN ('checking', 'savings', 'credit_card', 'cash', 'investment', 'crypto')",
+            name="chk_accounts_type",
+        ),
+        CheckConstraint("length(currency) = 3", name="chk_accounts_currency"),
+    )
 
 
 class Category(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
@@ -38,6 +62,11 @@ class Category(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
     icon: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     color: Mapped[str] = mapped_column(String(7), default="#10B981", nullable=False)
     type: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("type IN ('income', 'expense', 'transfer')", name="chk_categories_type"),
+        CheckConstraint("color ~* '^#[0-9A-Fa-f]{6}$'", name="chk_categories_color"),
+    )
 
 
 class Transaction(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
@@ -56,24 +85,41 @@ class Transaction(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
         ForeignKey("accounts.id", ondelete="RESTRICT"),
         nullable=True,
     )
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)  # NEVER float
+    currency: Mapped[str] = mapped_column(Text, nullable=False)
+    transaction_type: Mapped[str] = mapped_column("type", Text, nullable=False)  # income/expense/transfer
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
     category_id: Mapped[Optional[UUID]] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("categories.id", ondelete="RESTRICT"),
         nullable=True,
         index=True,
     )
-    reversed_transaction_id: Mapped[Optional[UUID]] = mapped_column(
+    occurred_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, index=True)
+    note: Mapped[Optional[str]] = mapped_column("description", Text, nullable=True)
+    reversal_of_id: Mapped[Optional[UUID]] = mapped_column(
+        "reversed_transaction_id",
         PGUUID(as_uuid=True),
         ForeignKey("transactions.id", ondelete="RESTRICT"),
         nullable=True,
     )
-    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    currency: Mapped[str] = mapped_column(String(3), nullable=False)
-    type: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(Text, default="draft", nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    occurred_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, index=True)
     posted_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+
+    # Aliases / Synonyms for backward compatibility
+    type = synonym("transaction_type")
+    description = synonym("note")
+    reversed_transaction_id = synonym("reversal_of_id")
+
+    __table_args__ = (
+        CheckConstraint(
+            "type IN ('income','expense','transfer','reversal')",
+            name="chk_transactions_type",
+        ),
+        CheckConstraint(
+            "status IN ('draft','pending_review','posted','reversed','rejected')",
+            name="chk_transactions_status",
+        ),
+    )
 
 
 class Budget(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):

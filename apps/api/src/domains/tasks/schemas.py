@@ -1,36 +1,34 @@
 """Pydantic v2 schemas for the Tasks domain."""
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
 
-from src.domains.tasks.enums import TaskPriority, TaskStatus
-
 
 class TaskCreate(BaseModel):
-    title: str = Field(min_length=1, max_length=500)
+    title: str = Field(..., min_length=1, max_length=500)
     description: Optional[str] = None
-    status: TaskStatus = TaskStatus.INBOX
-    priority: TaskPriority = TaskPriority.MEDIUM
+    priority: str = "medium"
+    status: Optional[str] = "inbox"
+    due_at: Optional[datetime] = None
     project_id: Optional[UUID] = None
     parent_id: Optional[UUID] = None
-    due_at: Optional[datetime] = None
-    estimate_minutes: Optional[int] = Field(default=None, gt=0)
+    estimate_minutes: Optional[int] = Field(None, ge=1, le=1440)
     waiting_for_reason: Optional[str] = None
 
 
 class TaskUpdate(BaseModel):
-    title: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    title: Optional[str] = Field(None, min_length=1, max_length=500)
     description: Optional[str] = None
-    status: Optional[TaskStatus] = None
-    priority: Optional[TaskPriority] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    due_at: Optional[datetime] = None
+    estimate_minutes: Optional[int] = None
     project_id: Optional[UUID] = None
     parent_id: Optional[UUID] = None
-    due_at: Optional[datetime] = None
-    estimate_minutes: Optional[int] = Field(default=None, gt=0)
-    tracked_seconds: Optional[int] = Field(default=None, ge=0)
+    tracked_seconds: Optional[int] = None
     rank: Optional[int] = None
     waiting_for_reason: Optional[str] = None
 
@@ -38,19 +36,20 @@ class TaskUpdate(BaseModel):
 class TaskResponse(BaseModel):
     id: UUID
     workspace_id: UUID
-    project_id: Optional[UUID] = None
-    parent_id: Optional[UUID] = None
     title: str
     description: Optional[str] = None
     status: str
     priority: str
     due_at: Optional[datetime] = None
-    estimate_minutes: Optional[int] = None
-    tracked_seconds: int
-    rank: int
-    version: int
-    waiting_for_reason: Optional[str] = None
     completed_at: Optional[datetime] = None
+    project_id: Optional[UUID] = None
+    parent_id: Optional[UUID] = None
+    estimate_minutes: Optional[int] = None
+    tracked_seconds: Optional[int] = 0
+    rank: Optional[int] = 0
+    version: int
+    is_deleted: bool = False
+    waiting_for_reason: Optional[str] = None
     cancelled_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime

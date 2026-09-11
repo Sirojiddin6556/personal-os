@@ -1,10 +1,31 @@
 """Pydantic v2 schemas for the Dashboard overview."""
 
+from datetime import datetime
 from typing import List
 from pydantic import BaseModel
 
 from src.domains.calendar.schemas import EventResponse
 from src.domains.tasks.schemas import TaskResponse
+
+
+class TimeWindow(BaseModel):
+    start: datetime
+    end: datetime
+    duration_minutes: int
+
+
+class BudgetSummary(BaseModel):
+    total_balance_minor: int
+    currency: str = "RUB"
+    active_accounts_count: int
+
+
+class DashboardToday(BaseModel):
+    events: List[EventResponse]
+    top_tasks: List[TaskResponse]
+    overdue_count: int
+    free_windows: List[TimeWindow]
+    budget_summary: BudgetSummary
 
 
 class DashboardSummaryResponse(BaseModel):

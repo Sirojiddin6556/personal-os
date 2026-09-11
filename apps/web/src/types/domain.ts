@@ -466,19 +466,23 @@ export interface Notification {
   /** Alert headline */
   title: string;
   /** Descriptive body */
-  message: string;
+  message?: string;
+  body?: string;
   /** Channel through which alert was routed */
-  channel: NotificationChannel;
+  channel: NotificationChannel | string;
   /** Urgency level */
-  priority: 'low' | 'normal' | 'high' | 'urgent';
+  priority: 'low' | 'normal' | 'high' | 'urgent' | string;
   /** Read acknowledgement flag */
-  is_read: boolean;
+  is_read?: boolean;
+  status?: string;
   /** Timestamp when user marked as read */
   read_at?: string | null;
   /** Optional deep link URI */
   link_url?: string | null;
   /** Creation timestamp (ISO 8601 UTC) */
   created_at?: string;
+  /** Update timestamp (ISO 8601 UTC) */
+  updated_at?: string;
 }
 
 // ============================================================================
@@ -617,3 +621,56 @@ export interface PaginatedResponse<TItem> {
   /** Pagination traversal tokens */
   pagination: PaginationMeta;
 }
+
+// ============================================================================
+// KNOWLEDGE & NOTES DOMAIN
+// ============================================================================
+
+export interface NoteCreateInput {
+  title: string;
+  content_markdown?: string;
+  is_pinned?: boolean;
+}
+
+export interface NoteUpdateInput {
+  title?: string;
+  content_markdown?: string;
+  is_pinned?: boolean;
+  is_archived?: boolean;
+}
+
+export interface NoteSearchResult {
+  note_id: string;
+  title: string;
+  snippet: string;
+  score: number;
+}
+
+// ============================================================================
+// NOTIFICATIONS DOMAIN
+// ============================================================================
+
+export interface NotificationCreateInput {
+  user_id: string;
+  title: string;
+  body: string;
+  channel?: string;
+  priority?: string;
+}
+
+export interface UnreadCountResponse {
+  unread_count: number;
+}
+
+// ============================================================================
+// INTEGRATIONS DOMAIN
+// ============================================================================
+
+export interface IntegrationStatus {
+  provider: 'google_calendar' | 'telegram' | string;
+  status: 'connected' | 'disconnected' | 'syncing' | 'error';
+  last_sync: string | null;
+  error_message?: string | null;
+  metadata?: Record<string, unknown>;
+}
+

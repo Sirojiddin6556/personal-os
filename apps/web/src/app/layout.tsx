@@ -1,23 +1,38 @@
+import type { Metadata, Viewport } from 'next';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from '@/lib/query-client';
+import { WebSocketProvider } from '@/components/providers/WebSocketProvider';
+import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import '@/styles/globals.css';
-import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: 'Personal OS | Персональная операционная система',
   description: 'AI-first персональная операционная система для задач, календаря и финансов',
+  manifest: '/manifest.json',
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export const viewport: Viewport = {
+  themeColor: '#6366f1',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru" data-theme="light">
+    <html lang="ru">
       <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
+        <link rel="manifest" href="/manifest.json" />
       </head>
       <body>
-        {children}
+        <ThemeProvider>
+          <QueryClientProvider client={queryClient}>
+            <WebSocketProvider>
+              {children}
+            </WebSocketProvider>
+          </QueryClientProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

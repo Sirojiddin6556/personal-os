@@ -1,6 +1,6 @@
 """Tasks and Kanban API endpoints."""
 
-from typing import List, Optional
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Response, status
@@ -15,6 +15,7 @@ from src.domains.tasks.schemas import (
 )
 from src.domains.tasks.service import task_service
 from src.shared.deps import get_db_session, get_workspace, parse_etag
+from src.shared.pagination import CursorPage
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 kanban_router = APIRouter(prefix="/kanban", tags=["kanban"])
@@ -28,40 +29,43 @@ kanban_router = APIRouter(prefix="/kanban", tags=["kanban"])
 )
 async def create_task(
     body: TaskCreate,
+    response: Response,
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     session: AsyncSession = Depends(get_db_session),
     workspace: Workspace = Depends(get_workspace),
 ) -> TaskResponse:
-    return await task_service.create(
+    created = await task_service.create(
         session=session,
         workspace_id=workspace.id,
         body=body,
         idempotency_key=idempotency_key,
     )
+    response.headers["ETag"] = f'"{created.version}"'
+    return created
 
 
 @router.get(
     "/",
-    response_model=List[TaskResponse],
-    summary="List workspace tasks with optional filters",
+    response_model=CursorPage[TaskResponse],
+    summary="List workspace tasks with cursor pagination and filters",
 )
 async def list_tasks(
     status: Optional[str] = Query(None, description="Filter by task status"),
     project_id: Optional[UUID] = Query(None, description="Filter by project ID"),
     priority: Optional[str] = Query(None, description="Filter by priority"),
-    limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    cursor: Optional[str] = Query(None, description="Opaque cursor for pagination offset"),
+    limit: int = Query(50, ge=1, le=100, description="Items per page"),
     session: AsyncSession = Depends(get_db_session),
     workspace: Workspace = Depends(get_workspace),
-) -> List[TaskResponse]:
+) -> CursorPage[TaskResponse]:
     return await task_service.list_tasks(
         session=session,
         workspace_id=workspace.id,
         status=status,
         project_id=project_id,
         priority=priority,
+        cursor=cursor,
         limit=limit,
-        offset=offset,
     )
 
 
@@ -94,11 +98,12 @@ async def update_task(
     session: AsyncSession = Depends(get_db_session),
     workspace: Workspace = Depends(get_workspace),
 ) -> TaskResponse:
+    # ETag version parsing
     version = parse_etag(if_match)
     updated = await task_service.update(
         session=session,
-        workspace_id=workspace.id,
         task_id=task_id,
+        workspace_id=workspace.id,
         body=body,
         version=version,
     )
@@ -109,21 +114,23 @@ async def update_task(
 @router.delete(
     "/{task_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete task with optimistic locking (If-Match ETag)",
+    summary="Soft delete task with optional optimistic locking (If-Match ETag)",
 )
 async def delete_task(
     task_id: UUID,
-    if_match: str = Header(..., alias="If-Match"),
+    if_match: Optional[str] = Header(None, alias="If-Match"),
     session: AsyncSession = Depends(get_db_session),
     workspace: Workspace = Depends(get_workspace),
-) -> None:
-    version = parse_etag(if_match)
+) -> Response:
+    # soft delete
+    version = parse_etag(if_match) if if_match else None
     await task_service.delete(
         session=session,
         workspace_id=workspace.id,
         task_id=task_id,
         version=version,
     )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @kanban_router.get(

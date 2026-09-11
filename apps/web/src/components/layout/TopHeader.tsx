@@ -1,21 +1,33 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useUIStore } from '@/stores/ui-store';
+import { useNotifications } from '@/hooks/useNotifications';
+import { formatDateShort } from '@/lib/utils';
+import Link from 'next/link';
 
 export function TopHeader() {
-  const { openQuickAdd } = useUIStore();
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const { openQuickAdd, theme, setTheme } = useUIStore();
+  const { notifications, unreadCount, markRead, markAllRead } = useNotifications();
+  const [isNotifOpen, setIsNotifOpen] = useState(false);
+  const notifRef = useRef<HTMLDivElement | null>(null);
 
+  // Close notifications popover on click outside
   useEffect(() => {
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    setTheme(isDark ? 'dark' : 'light');
-  }, []);
+    const handleClickOutside = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setIsNotifOpen(false);
+      }
+    };
+    if (isNotifOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isNotifOpen]);
 
   const toggleTheme = () => {
-    const nextTheme = theme === 'light' ? 'dark' : 'light';
+    const nextTheme = theme === 'dark' ? 'light' : 'dark';
     setTheme(nextTheme);
-    document.documentElement.setAttribute('data-theme', nextTheme);
   };
 
   useEffect(() => {
@@ -58,7 +70,7 @@ export function TopHeader() {
         {/* Quick Add CTA button */}
         <button
           onClick={() => openQuickAdd()}
-          className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-primary text-white hover:bg-primary-600 active:scale-95 transition-all shadow-xs"
+          className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-primary text-white hover:bg-primary-600 active:scale-95 transition-all shadow-xs cursor-pointer"
         >
           <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
             <line x1="12" y1="5" x2="12" y2="19" />
@@ -71,7 +83,7 @@ export function TopHeader() {
         <button
           onClick={toggleTheme}
           aria-label="Переключить тему оформления"
-          className="p-2 text-text-muted hover:text-text-primary rounded-lg hover:bg-surface-muted transition-colors"
+          className="p-2 text-text-muted hover:text-text-primary rounded-lg hover:bg-surface-muted transition-colors cursor-pointer"
         >
           {theme === 'dark' ? (
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -92,24 +104,100 @@ export function TopHeader() {
           )}
         </button>
 
-        {/* Notification Bell */}
-        <button
-          aria-label="Уведомления"
-          className="relative p-2 text-text-muted hover:text-text-primary rounded-lg hover:bg-surface-muted transition-colors"
-        >
-          <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-          </svg>
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-primary rounded-full ring-2 ring-surface" />
-        </button>
+        {/* Notification Bell & Dropdown */}
+        <div className="relative" ref={notifRef}>
+          <button
+            onClick={() => setIsNotifOpen(!isNotifOpen)}
+            aria-label={`Уведомления ${unreadCount > 0 ? `(${unreadCount} новых)` : ''}`}
+            className="relative p-2 text-text-muted hover:text-text-primary rounded-lg hover:bg-surface-muted transition-colors cursor-pointer"
+          >
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
+            {unreadCount > 0 && (
+              <span className="absolute top-1 right-1 min-w-[16px] h-4 px-1 bg-primary text-white text-[10px] font-bold rounded-full flex items-center justify-center ring-2 ring-surface">
+                {unreadCount > 9 ? '9+' : unreadCount}
+              </span>
+            )}
+          </button>
 
-        {/* User Avatar */}
-        <div className="flex items-center gap-2 pl-2 border-l border-border">
+          {/* Notifications Dropdown */}
+          {isNotifOpen && (
+            <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-surface border border-border rounded-2xl shadow-xl z-50 p-4 space-y-3 animate-slide-in">
+              <div className="flex items-center justify-between border-b border-border pb-2.5">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-text-primary">
+                    Уведомления
+                  </h3>
+                  {unreadCount > 0 && (
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                      {unreadCount} новых
+                    </span>
+                  )}
+                </div>
+                {unreadCount > 0 && (
+                  <button
+                    onClick={() => markAllRead()}
+                    className="text-[11px] text-primary hover:underline font-medium"
+                  >
+                    Прочитать все
+                  </button>
+                )}
+              </div>
+
+              <div className="max-h-80 overflow-y-auto space-y-2 pr-1">
+                {notifications.length > 0 ? (
+                  notifications.map((n) => {
+                    const isUnread = !n.read_at && n.status !== 'read';
+                    return (
+                      <div
+                        key={n.id}
+                        onClick={() => {
+                          if (isUnread) markRead(n.id);
+                        }}
+                        className={`p-2.5 rounded-xl border text-xs transition-colors cursor-pointer ${
+                          isUnread
+                            ? 'bg-primary/5 border-primary/20 text-text-primary font-medium'
+                            : 'bg-surface-muted/50 border-border text-text-muted'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-text-primary truncate">
+                            {n.title}
+                          </span>
+                          {n.created_at && (
+                            <span className="text-[10px] text-text-muted shrink-0">
+                              {formatDateShort(n.created_at)}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-text-secondary mt-0.5 line-clamp-2">
+                          {n.message || n.body || ''}
+                        </p>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="py-6 text-center text-xs text-text-muted">
+                    Нет новых уведомлений
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* User Profile Avatar / Settings Link */}
+        <Link
+          href="/settings/integrations"
+          title="Настройки интеграций"
+          className="flex items-center gap-2 pl-2 border-l border-border hover:opacity-80 transition-opacity"
+        >
           <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">
             S
           </div>
-        </div>
+        </Link>
       </div>
     </header>
   );

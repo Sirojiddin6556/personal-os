@@ -37,6 +37,15 @@ class CursorPage(BaseModel, Generic[T]):
     has_more: bool = False
     total_count: Optional[int] = None
 
+    def __iter__(self):
+        return iter(self.items)
+
+    def __len__(self) -> int:
+        return len(self.items)
+
+    def __getitem__(self, index):
+        return self.items[index]
+
 
 def encode_cursor(payload: Dict[str, Any]) -> str:
     """Encode dictionary into base64 URL-safe opaque cursor string."""
