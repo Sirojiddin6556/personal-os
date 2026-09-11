@@ -13,9 +13,11 @@
  */
 export enum TaskStatus {
   INBOX = 'inbox',
+  TODO = 'todo',
   BACKLOG = 'backlog',
   SCHEDULED = 'scheduled',
   IN_PROGRESS = 'in_progress',
+  WAITING = 'waiting',
   BLOCKED = 'blocked',
   DONE = 'done',
   CANCELED = 'canceled',
@@ -23,9 +25,11 @@ export enum TaskStatus {
 
 export type TaskStatusType =
   | 'inbox'
+  | 'todo'
   | 'backlog'
   | 'scheduled'
   | 'in_progress'
+  | 'waiting'
   | 'blocked'
   | 'done'
   | 'canceled';
@@ -68,6 +72,7 @@ export enum TransactionType {
 }
 
 export type TransactionTypeValue = 'income' | 'expense' | 'transfer';
+
 
 /**
  * Financial account category.
@@ -212,8 +217,15 @@ export interface CalendarEvent {
   start_time: string;
   /** End datetime in ISO 8601 UTC */
   end_time: string;
+  /** Convenience UI alias for start */
+  start?: string;
+  /** Convenience UI alias for end */
+  end?: string;
+  /** Convenience color code */
+  color?: string;
   /** Full day event flag */
   is_all_day?: boolean;
+
   /** Whether the event was imported from external provider */
   is_external?: boolean;
   /** External calendar integration provider name */
@@ -318,6 +330,9 @@ export interface Transaction {
   category_id?: string | null;
   /** Display category name */
   category?: string | null;
+  /** Display category icon */
+  category_icon?: string;
+
   /** Amount in integer minor units (always positive integer) */
   amount_minor: number;
   /** Convenience display amount in major units (e.g. 150.50) */
@@ -550,7 +565,18 @@ export interface BudgetSummary {
   monthly_limit_minor: number;
   /** Base currency code */
   currency: string;
+  /** Convenience display spent */
+  spent?: number;
+  /** Convenience display limit */
+  limit?: number;
+  /** Convenience display percentage */
+  percentage?: number;
+  /** Convenience display remaining */
+  remaining?: number;
+  /** Category if specific */
+  category?: string;
 }
+
 
 /**
  * Aggregate payload for the Today Dashboard screen (/today).
