@@ -8,7 +8,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 
 class UserRegisterRequest(BaseModel):
-    email: EmailStr
+    email: str = Field(..., min_length=3, max_length=255)
     password: str = Field(min_length=8, max_length=128)
     full_name: str = Field(min_length=1, max_length=100)
     timezone: str = Field(default="UTC")
@@ -16,8 +16,8 @@ class UserRegisterRequest(BaseModel):
 
 
 class UserLoginRequest(BaseModel):
-    email: EmailStr
-    password: str
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=1)
 
 
 class TokenResponse(BaseModel):
@@ -74,5 +74,5 @@ class MembershipResponse(BaseModel):
 
 
 class InviteMemberRequest(BaseModel):
-    email: EmailStr
+    email: str = Field(..., min_length=3, max_length=255)
     role: str = Field(default="member", pattern="^(admin|member|viewer)$")
