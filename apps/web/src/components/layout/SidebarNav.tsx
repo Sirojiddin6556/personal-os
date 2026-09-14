@@ -220,7 +220,7 @@ export function SidebarNav() {
         <button
           onClick={toggleSidebar}
           aria-label={isSidebarCollapsed ? 'Развернуть сайдбар' : 'Свернуть сайдбар'}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium text-text-muted hover:text-text-primary hover:bg-surface-muted transition-colors"
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium text-text-muted hover:text-text-primary hover:bg-surface-muted transition-colors cursor-pointer"
         >
           <svg
             className={cn('w-4 h-4 shrink-0 transition-transform duration-fast', isSidebarCollapsed && 'rotate-180')}
@@ -233,6 +233,31 @@ export function SidebarNav() {
             <line x1="4" y1="12" x2="20" y2="12" />
           </svg>
           {!isSidebarCollapsed && <span>Свернуть панель</span>}
+        </button>
+
+        <button
+          onClick={() => {
+            try {
+              localStorage.removeItem('personal_os_access_token');
+              localStorage.removeItem('personal_os_bypass_auth');
+              localStorage.removeItem('personal_os_user');
+              document.cookie = 'personal_os_access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
+              window.dispatchEvent(new Event('auth:logout'));
+            } catch {}
+            window.location.href = '/login';
+          }}
+          title={isSidebarCollapsed ? 'Выйти' : undefined}
+          className={cn(
+            'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer',
+            isSidebarCollapsed && 'justify-center px-0'
+          )}
+        >
+          <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+          {!isSidebarCollapsed && <span>Выйти</span>}
         </button>
       </div>
     </aside>

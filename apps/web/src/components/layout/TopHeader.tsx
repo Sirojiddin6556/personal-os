@@ -270,7 +270,14 @@ export function TopHeader() {
               <button
                 onClick={() => {
                   setIsProfileOpen(false);
-                  window.location.reload();
+                  try {
+                    localStorage.removeItem('personal_os_access_token');
+                    localStorage.removeItem('personal_os_bypass_auth');
+                    localStorage.removeItem('personal_os_user');
+                    document.cookie = 'personal_os_access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
+                    window.dispatchEvent(new Event('auth:logout'));
+                  } catch {}
+                  window.location.href = '/login';
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
               >
@@ -279,7 +286,7 @@ export function TopHeader() {
                   <polyline points="16 17 21 12 16 7" />
                   <line x1="21" y1="12" x2="9" y2="12" />
                 </svg>
-                <span>Перезагрузить сессию</span>
+                <span>Выйти из аккаунта</span>
               </button>
             </div>
           )}
