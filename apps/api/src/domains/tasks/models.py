@@ -16,7 +16,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID as PGUUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from src.db.base import Base, TimestampMixin, UUIDMixin, WorkspaceMixin
 
@@ -72,6 +72,33 @@ class Task(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
     rank: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     waiting_for_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     cancelled_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+
+    @validates("priority")
+    def validate_priority(self, key: str, value: Optional[str]) -> str:
+        if not value:
+            return "medium"
+        val = str(value).lower().strip()
+        mapping = {
+            "p1": "critical",
+            "critical": "critical",
+            "urgent": "critical",
+            "p2": "high",
+            "high": "high",
+            "p3": "medium",
+            "medium": "medium",
+            "normal": "medium",
+            "p4": "low",
+            "low": "low",
+        }
+        return mapping.get(val, "medium")
+
+    @validates("status")
+    def validate_status(self, key: str, value: Optional[str]) -> str:
+        if not value:
+            return "inbox"
+        val = str(value).lower().strip()
+        allowed = {"inbox", "todo", "scheduled", "in_progress", "waiting", "done", "cancelled", "archived"}
+        return val if val in allowed else "inbox"
 
     # Hierarchy relationship
     parent: Mapped[Optional["Task"]] = relationship(
