@@ -4,7 +4,21 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+
+_PRIORITY_ALIASES = {
+    "p1": "critical",
+    "p2": "high",
+    "p3": "medium",
+    "p4": "low",
+}
+
+
+def normalize_priority(value: str) -> str:
+    """Accept UI priority tiers while keeping the database contract canonical."""
+    normalized = value.strip().lower()
+    return _PRIORITY_ALIASES.get(normalized, normalized)
 
 
 class TaskCreate(BaseModel):
@@ -17,6 +31,11 @@ class TaskCreate(BaseModel):
     parent_id: Optional[UUID] = None
     estimate_minutes: Optional[int] = Field(None, ge=1, le=1440)
     waiting_for_reason: Optional[str] = None
+
+    @field_validator("priority")
+    @classmethod
+    def normalize_priority_alias(cls, value: str) -> str:
+        return normalize_priority(value)
 
 
 class TaskUpdate(BaseModel):
@@ -31,6 +50,11 @@ class TaskUpdate(BaseModel):
     tracked_seconds: Optional[int] = None
     rank: Optional[int] = None
     waiting_for_reason: Optional[str] = None
+
+    @field_validator("priority")
+    @classmethod
+    def normalize_priority_alias(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_priority(value) if value is not None else None
 
 
 class TaskResponse(BaseModel):

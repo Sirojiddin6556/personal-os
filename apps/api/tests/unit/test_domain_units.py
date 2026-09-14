@@ -302,6 +302,14 @@ def test_task_create_pydantic_schema_validation():
         TaskCreate(title="Too long estimate", estimate_minutes=1441)
 
 
+def test_task_priority_aliases_normalize_to_api_values():
+    """The web Kanban's P1-P4 tiers map to canonical persistence values."""
+    expected = {"p1": "critical", "p2": "high", "p3": "medium", "p4": "low"}
+    for alias, canonical in expected.items():
+        assert TaskCreate(title="Alias task", priority=alias).priority == canonical
+        assert TaskUpdate(priority=alias).priority == canonical
+
+
 def test_kanban_schemas_serialization():
     """Verify Kanban column and board response schemas."""
     now = datetime.now(timezone.utc)
@@ -916,4 +924,3 @@ def test_goal_and_project_schemas_status_normalization():
 
     with pytest.raises(ValidationError):
         ProjectCreate(name="Invalid", status="blocked")
-
