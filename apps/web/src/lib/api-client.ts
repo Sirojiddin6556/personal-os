@@ -34,7 +34,27 @@ export class ApiError extends Error {
   public readonly code?: string;
 
   constructor(problem: ProblemDetails) {
-    super(problem.detail || problem.title || `HTTP Error ${problem.status}`);
+    let detailMessage = '';
+    const rawDetail: unknown = problem.detail;
+    if (typeof rawDetail === 'string') {
+      detailMessage = rawDetail;
+    } else if (Array.isArray(rawDetail)) {
+      detailMessage = (rawDetail as unknown[])
+        .map((item: any) => {
+          if (typeof item === 'string') return item;
+          if (item && typeof item === 'object') {
+            const loc = Array.isArray(item.loc) ? item.loc.join('.') : '';
+            const msg = item.msg || item.message || JSON.stringify(item);
+            return loc ? `${loc}: ${msg}` : msg;
+          }
+          return String(item);
+        })
+        .join('; ');
+    } else if (rawDetail && typeof rawDetail === 'object') {
+      detailMessage = JSON.stringify(rawDetail);
+    }
+
+    super(detailMessage || problem.title || `HTTP Error ${problem.status}`);
     this.name = 'ApiError';
     this.status = problem.status;
     this.problem = problem;
@@ -201,8 +221,10 @@ export async function apiRequest<TData, TBody = unknown>(
   if (effectiveVersion !== undefined && effectiveVersion !== null) {
     requestHeaders['If-Match'] =
       typeof effectiveVersion === 'number'
-        ? `W/"${effectiveVersion}"`
-        : String(effectiveVersion);
+        ? `"${effectiveVersion}"`
+        : String(effectiveVersion).startsWith('"')
+        ? String(effectiveVersion)
+        : `"${effectiveVersion}"`;
   }
 
   // Request body

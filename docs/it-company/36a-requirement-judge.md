@@ -1,4 +1,4 @@
-﻿# 36a. Requirement Judge Report
+# 36a. Requirement Judge Report
 
 STATUS: VERIFIED
 TASK: Формальная построчная верификация требований (Requirements Traceability & Conformance Verification) против PRD (`01`), User Stories / Acceptance Criteria (`02`) и матрицы тест-плана QA Lead (`22`).
@@ -12,7 +12,7 @@ INPUT: `docs/it-company/01-product-discovery-manager.md`, `docs/it-company/02-bu
 |---|---|---|---|---|
 | **REQ-QA-01** | Быстрый ввод (`Cmd+K`) на естественном языке ≤ 3 действий | TC-E2E-01, TC-M-01 | `QuickAddModal.tsx`, `POST /v1/advisor/parse` | **PASS** |
 | **REQ-QA-02** | Извлечение даты, дедлайна, приоритета (`!high`) и категории | TC-UNIT-AI, TC-E2E-01 | `src/domains/ai_advisor/service.py:parse_input` | **PASS** |
-| **REQ-QA-03** | 6-статусный Канбан (`inbox` → `todo` → `scheduled` → `in_progress` → `waiting` → `done`) | TC-E2E-02, TC-UNIT-01 | `KanbanBoard.tsx`, `TaskCard.tsx`, `TaskStatus` Enum | **PASS** |
+| **REQ-QA-03** | 8-статусный жизненный цикл задач: 5 рабочих колонок Канбан (`inbox`, `todo`, `scheduled`, `in_progress`, `waiting`) + терминальные (`done`, `cancelled`, `archived`) | TC-E2E-02, TC-UNIT-01 | `KanbanBoard.tsx`, `TaskCard.tsx`, `TaskStatus` Enum | **PASS** |
 | **REQ-QA-04** | Оптимистичные обновления и Undo Toast при завершении задачи | TC-E2E-02 | `useTasks.ts:useCompleteTask`, `Toast.tsx` | **PASS** |
 | **REQ-QA-05** | Конфликты одновременного редактирования (`If-Match: W/"{version}"` → 409) | TC-M-04, TC-UNIT-03 | `src/domains/tasks/service.py`, `api-client.ts` | **PASS** |
 | **REQ-QA-06** | Google Calendar двусторонний синк по дельта-токену `syncToken` | TC-INT-03 | `src/integrations/google_calendar/sync.py:incremental_sync` | **PASS** |

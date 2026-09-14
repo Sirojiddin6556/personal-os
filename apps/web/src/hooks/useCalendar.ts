@@ -49,7 +49,12 @@ export function useCalendarEvents(from?: string, to?: string) {
     queryKey: queryKeys.calendar.events({ from, to }),
     queryFn: () =>
       apiRequest<CalendarEvent[]>('GET', '/calendar/events', {
-        params: { from, to },
+        params: {
+          from,
+          to,
+          start_date: from,
+          end_date: to,
+        },
       }),
     enabled: Boolean(from && to),
   });
@@ -116,9 +121,11 @@ export function useGoogleSyncStatus() {
     },
   });
 
-  const triggerSyncMutation = useMutation<{ job_id: string; status: string }, Error>({
+  const triggerSyncMutation = useMutation<{ job_id?: string; status?: string }, Error>({
     mutationFn: () =>
-      apiRequest<{ job_id: string; status: string }>('POST', '/integrations/google/sync'),
+      apiRequest<{ job_id?: string; status?: string }>('POST', '/integrations/google/sync', {
+        body: {},
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.calendar.syncStatus() });
       queryClient.invalidateQueries({ queryKey: queryKeys.calendar.all });

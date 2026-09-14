@@ -396,10 +396,12 @@ export default function FinancePage() {
             <form onSubmit={handleQuickTransactionSubmit} className="space-y-3">
               {/* Account Selector */}
               <div>
-                <label className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
+                <label htmlFor="quick-tx-account" className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
                   {formTxType === 'expense' ? 'Счёт списания' : 'Счёт зачисления'}
                 </label>
                 <select
+                  id="quick-tx-account"
+                  aria-label={formTxType === 'expense' ? 'Счёт списания' : 'Счёт зачисления'}
                   value={selectedAccountId || (displayAccounts[0]?.id ?? '')}
                   onChange={(e) => setSelectedAccountId(e.target.value)}
                   disabled={displayAccounts.length === 0}
@@ -420,10 +422,12 @@ export default function FinancePage() {
               {/* Amount and Category Grid */}
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
+                  <label htmlFor="quick-tx-amount" className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
                     Сумма ({primaryCurrency})
                   </label>
                   <input
+                    id="quick-tx-amount"
+                    aria-label={`Сумма в ${primaryCurrency}`}
                     type="text"
                     inputMode="decimal"
                     placeholder="45000"
@@ -435,10 +439,12 @@ export default function FinancePage() {
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
+                  <label htmlFor="quick-tx-category" className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
                     Категория
                   </label>
                   <select
+                    id="quick-tx-category"
+                    aria-label="Категория транзакции"
                     value={selectedCategoryId}
                     onChange={(e) => setSelectedCategoryId(e.target.value)}
                     className="w-full text-xs px-3 py-2 bg-surface-muted border border-border rounded-xl text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"

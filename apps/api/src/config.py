@@ -48,6 +48,8 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
+        "http://localhost:8008",
+        "http://127.0.0.1:8008",
     ]
 
     @field_validator("cors_origins", mode="before")
@@ -60,9 +62,13 @@ class Settings(BaseSettings):
     # Integrations
     google_client_id: str = ""
     google_client_secret: str = ""
-    google_redirect_uri: str = "http://localhost:8000/v1/integrations/google/callback"
+    # The local web app uses the host API port 8008. Keep this default aligned
+    # with the development environment so OAuth never generates a callback for
+    # a different service/port when GOOGLE_REDIRECT_URI is omitted.
+    google_redirect_uri: str = "http://localhost:8008/v1/integrations/google/callback"
     telegram_bot_token: str = ""
     telegram_webhook_secret: str = ""
+    telegram_webhook_base_url: str = ""
 
     # Outbox relay configuration
     outbox_polling_interval_seconds: float = 2.0

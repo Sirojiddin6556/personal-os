@@ -64,12 +64,33 @@ export default function CalendarPage() {
     openQuickAdd('event');
   };
 
-  const handleEventClick = (clickInfo: { event: { title: string; extendedProps: Record<string, unknown> } }) => {
-    const { title, extendedProps } = clickInfo.event;
+  const [selectedEvent, setSelectedEvent] = useState<{
+    title: string;
+    description?: string;
+    start?: string;
+    end?: string;
+    isExternal?: boolean;
+  } | null>(null);
+
+  const handleEventClick = (clickInfo: {
+    event: {
+      title: string;
+      startStr: string;
+      endStr: string;
+      extendedProps: Record<string, unknown>;
+    };
+  }) => {
+    const { title, startStr, endStr, extendedProps } = clickInfo.event;
     if (extendedProps.isTaskTimeblock && extendedProps.taskId) {
       useUIStore.getState().openTaskDetail(extendedProps.taskId as string);
     } else {
-      alert(`Событие: ${title}\n${(extendedProps.description as string) || 'Без описания'}`);
+      setSelectedEvent({
+        title,
+        description: (extendedProps.description as string) || undefined,
+        start: startStr,
+        end: endStr,
+        isExternal: !!extendedProps.isExternal,
+      });
     }
   };
 
@@ -87,8 +108,8 @@ export default function CalendarPage() {
         </div>
 
         {/* Google Calendar Sync Badge & Action */}
-        <div className="flex items-center gap-3 bg-surface-muted border border-border px-3.5 py-2 rounded-xl text-xs">
-          <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 bg-surface-muted border border-border px-3.5 py-2 rounded-xl text-xs">
             <span
               className={`w-2.5 h-2.5 rounded-full ${
                 syncStatus === 'connected'
@@ -109,38 +130,70 @@ export default function CalendarPage() {
                 : syncStatus === 'connected'
                 ? 'Подключен'
                 : syncStatus === 'error'
-                ? 'Ошибка'
+                ? 'Требуется действие'
                 : 'Не подключен'}
             </span>
+            {lastSync && (
+              <span className="hidden md:inline text-[11px] text-text-muted border-l border-border pl-2">
+                посл: {formatDateShort(lastSync)}
+              </span>
+            )}
           </div>
 
-          {lastSync && (
-            <span className="hidden md:inline text-[11px] text-text-muted border-l border-border pl-2">
-              посл: {formatDateShort(lastSync)}
-            </span>
-          )}
+          {/* Explicit Sync Button with text */}
+          <button
+            onClick={() => triggerSync()}
+            disabled={isSyncing}
+            aria-label="Синхронизировать с Google Calendar"
+            className="flex items-center gap-2 px-3.5 py-2 bg-primary hover:bg-primary-600 active:scale-95 text-white rounded-xl text-xs font-semibold shadow-sm transition-all disabled:opacity-50 cursor-pointer"
+          >
+            <svg className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+            </svg>
+            <span>{isSyncing ? 'Синхронизация...' : 'Синхронизировать'}</span>
+          </button>
 
-          {syncStatus === 'connected' ? (
-            <button
-              onClick={() => triggerSync()}
-              disabled={isSyncing}
-              title="Запустить синхронизацию"
-              className="p-1 hover:bg-surface rounded text-text-muted hover:text-text-primary transition-colors disabled:opacity-50"
-            >
-              <svg className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
-              </svg>
-            </button>
-          ) : (
+          {syncStatus !== 'connected' && syncStatus !== 'syncing' && (
             <Link
               href="/settings/integrations"
-              className="text-primary hover:underline font-semibold text-[11px]"
+              className="text-xs text-primary hover:underline font-medium px-2 py-1"
             >
-              Настроить
+              Настройки →
             </Link>
           )}
         </div>
       </div>
+
+      {/* Helpful banner when Google Calendar API is disabled or encountering permission error */}
+      {syncStatus === 'error' && (
+        <div className="bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 p-3.5 rounded-xl text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 shrink-0 text-amber-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span>
+              В Google Cloud Console для проекта <b>811023701981</b> не активирован сервис Google Calendar API.{' '}
+              <a
+                href="https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview?project=811023701981"
+                target="_blank"
+                rel="noreferrer"
+                className="underline font-bold text-primary ml-1"
+              >
+                Включить в 1 клик в Google Console ↗
+              </a>
+            </span>
+          </div>
+          <button
+            onClick={() => triggerSync()}
+            disabled={isSyncing}
+            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-bold shrink-0 self-start sm:self-auto cursor-pointer"
+          >
+            {isSyncing ? 'Проверка...' : 'Повторить синхронизацию'}
+          </button>
+        </div>
+      )}
 
       {/* Legend & Controls */}
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -208,6 +261,56 @@ export default function CalendarPage() {
           height="auto"
         />
       </div>
+
+      {/* Event Detail Modal Dialog */}
+      {selectedEvent && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="calendar-event-dialog-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs"
+        >
+          <div className="w-full max-w-md bg-surface border border-border rounded-2xl p-5 shadow-xl space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 id="calendar-event-dialog-title" className="text-base font-bold text-text-primary">
+                  {selectedEvent.title}
+                </h2>
+                {selectedEvent.isExternal && (
+                  <span className="text-[10px] text-text-muted mt-0.5 inline-block">
+                    Синхронизировано с Google Calendar
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedEvent(null)}
+                aria-label="Закрыть"
+                className="text-text-muted hover:text-text-primary p-1 rounded-lg hover:bg-surface-muted transition-colors text-sm font-bold"
+              >
+                ×
+              </button>
+            </div>
+
+            {selectedEvent.description && (
+              <p className="text-xs text-text-secondary whitespace-pre-wrap bg-surface-muted/60 p-3 rounded-xl border border-border">
+                {selectedEvent.description}
+              </p>
+            )}
+
+            <div className="flex items-center justify-between text-xs text-text-muted pt-2 border-t border-border">
+              <span>{selectedEvent.start?.slice(0, 16).replace('T', ' ')}</span>
+              <button
+                type="button"
+                onClick={() => setSelectedEvent(null)}
+                className="px-3.5 py-1.5 rounded-xl bg-primary text-white text-xs font-semibold hover:bg-primary-600 transition-colors"
+              >
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

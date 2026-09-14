@@ -142,9 +142,10 @@ class TaskService:
             raise NotFoundError(resource="Task", identifier=task_id)
 
         if task.version != version:
-            raise ConflictError(
-                title="Optimistic Lock Conflict",
-                detail=f"Task version conflict: client provided version {version}, current database version is {task.version}.",
+            raise OptimisticLockError(
+                resource="Task",
+                expected_version=version,
+                actual_version=task.version,
             )
 
         update_data = body.model_dump(exclude_unset=True)
@@ -367,6 +368,20 @@ class TaskService:
         }
 
         return KanbanBoardResponse(columns=columns)
+
+    async def complete_task(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        task_id: UUID,
+    ) -> TaskResponse:
+        """Explicitly transition a task to DONE status."""
+        return await self.update(
+            session=session,
+            workspace_id=workspace_id,
+            task_id=task_id,
+            body=TaskUpdate(status=TaskStatus.DONE.value),
+        )
 
 
 task_service = TaskService()

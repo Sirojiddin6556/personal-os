@@ -330,11 +330,13 @@ class LLMClient:
                 val = float(numbers[0].replace(",", "."))
                 amount_minor = int(val * 100)
 
-            currency = "USD"
-            if "руб" in lower or "₽" in lower or "rub" in lower:
-                currency = "RUB"
-            elif "eur" in lower or "€" in lower:
+            currency = "UZS"
+            if "usd" in lower or "$" in lower or "доллар" in lower:
+                currency = "USD"
+            elif "eur" in lower or "€" in lower or "евро" in lower:
                 currency = "EUR"
+            elif "руб" in lower or "₽" in lower or "rub" in lower:
+                currency = "RUB"
 
             # Extract category or note
             category = "groceries" if any(w in lower for w in ["еда", "кофе", "обед", "продукты", "food", "coffee", "lunch"]) else "general"

@@ -105,11 +105,11 @@ async def update_task(
     task_id: UUID,
     body: TaskUpdate,
     response: Response,
-    if_match: str = Header(..., alias="If-Match"),
+    if_match: Optional[str] = Header(None, alias="If-Match"),
     session: AsyncSession = Depends(get_db_session),
     workspace: Workspace = Depends(get_workspace),
 ) -> TaskResponse:
-    # ETag version parsing
+    # ETag version parsing (raises 428 if missing, 400 if malformed)
     version = parse_etag(if_match)
     updated = await task_service.update(
         session=session,
@@ -142,6 +142,23 @@ async def delete_task(
         version=version,
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post(
+    "/{task_id}/complete",
+    response_model=TaskResponse,
+    summary="Explicitly transition task to DONE status",
+)
+async def complete_task(
+    task_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> TaskResponse:
+    return await task_service.complete_task(
+        session=session,
+        workspace_id=workspace.id,
+        task_id=task_id,
+    )
 
 
 @kanban_router.get(

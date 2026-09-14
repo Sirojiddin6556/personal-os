@@ -58,7 +58,6 @@ export function BudgetGaugeRow({
 
   return (
     <div
-      role="row"
       onClick={() => onClick?.(budget)}
       className={cn(
         'group flex flex-col p-3.5 bg-surface hover:bg-surface-muted/60 border border-border rounded-xl transition-all select-none',
@@ -98,6 +97,7 @@ export function BudgetGaugeRow({
       {/* Progress Bar with WAI-ARIA Semantics */}
       <div
         role="progressbar"
+        aria-label={`Прогресс бюджета: ${categoryName}`}
         aria-valuenow={Math.min(percent, 100)}
         aria-valuemin={0}
         aria-valuemax={100}

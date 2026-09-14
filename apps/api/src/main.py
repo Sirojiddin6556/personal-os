@@ -2,11 +2,10 @@
 
 import logging
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, Dict
 
-from fastapi import FastAPI, status
+from fastapi import FastAPI, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from src.config import settings
@@ -27,7 +26,10 @@ from src.domains.projects.router import (
 from src.domains.tasks.router import kanban_router, router as tasks_router
 from src.integrations.github.router import router as github_router
 from src.integrations.google_calendar.router import router as google_router
-from src.integrations.telegram.router import router as telegram_router
+from src.integrations.telegram.router import (
+    integrations_telegram_router,
+    router as telegram_router,
+)
 from src.shared.exceptions import DomainError, domain_error_handler
 from src.shared.outbox import outbox_relay
 from src.ws.router import router as ws_router
@@ -58,10 +60,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as ex:
         logger.warning("Failed to start outbox relay: %s", ex)
 
+    # 3. Start Telegram background poller (for local/dev environments)
+    try:
+        from src.integrations.telegram.poller import telegram_poller
+        await telegram_poller.start()
+    except Exception as ex:
+        logger.warning("Failed to start telegram poller: %s", ex)
+
     yield
 
     # Shutdown sequence
     logger.info("Shutting down Personal OS API...")
+    try:
+        from src.integrations.telegram.poller import telegram_poller
+        await telegram_poller.stop()
+    except Exception as ex:
+        logger.warning("Error stopping telegram poller: %s", ex)
+
     try:
         await outbox_relay.stop()
     except Exception as ex:
@@ -98,16 +113,52 @@ def create_app() -> FastAPI:
     # 2. RFC 9457 Problem Details Exception Handler
     app.add_exception_handler(DomainError, domain_error_handler)
 
-    # 3. Health check route
+    # 3. Health check routes (Liveness and Readiness)
     @app.get("/health", tags=["system"], status_code=status.HTTP_200_OK)
     @app.get("/v1/health", tags=["system"], status_code=status.HTTP_200_OK)
-    async def health_check() -> Dict[str, str]:
+    @app.get("/v1/health/live", tags=["system"], status_code=status.HTTP_200_OK)
+    async def liveness_check() -> Dict[str, str]:
+        """Liveness check: process is running and accepting HTTP requests."""
         return {
             "status": "healthy",
             "app": settings.app_name,
             "version": settings.app_version,
             "environment": settings.environment,
         }
+
+    @app.get("/v1/health/ready", tags=["system"], status_code=status.HTTP_200_OK)
+    async def readiness_check(response: Response) -> Dict[str, Any]:
+        """Readiness check: validates core infrastructure dependencies (DB, Redis, Crypto)."""
+        checks: Dict[str, Any] = {"database": "ok", "redis": "ok", "crypto": "ok"}
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(text("SELECT 1"))
+        except Exception as ex:
+            checks["database"] = f"error: {ex}"
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            return {"status": "not_ready", "checks": checks}
+
+        # Redis connection check (fail-closed in staging/production, degraded in dev)
+        try:
+            import redis.asyncio as aioredis
+            r = aioredis.from_url(settings.redis_url, decode_responses=True)
+            await r.ping()
+            await r.aclose()
+        except Exception as ex:
+            if settings.environment in ("staging", "production"):
+                checks["redis"] = f"error: {ex}"
+                response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+                return {"status": "not_ready", "checks": checks}
+            checks["redis"] = "degraded (dev fallback)"
+
+        from src.integrations.crypto import crypto_service
+        if not crypto_service or not crypto_service._key:
+            checks["crypto"] = "missing_secret_key"
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            return {"status": "not_ready", "checks": checks}
+
+        return {"status": "ready", "checks": checks}
+
 
     # 4. Include Domain Routers with /v1 Prefix
     v1_prefix = settings.api_v1_prefix  # "/v1"
@@ -127,6 +178,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard_router, prefix=v1_prefix)
     app.include_router(google_router, prefix=v1_prefix)
     app.include_router(github_router, prefix=v1_prefix)
+    app.include_router(integrations_telegram_router, prefix=v1_prefix)
     app.include_router(telegram_router, prefix=v1_prefix)
     app.include_router(telegram_router)  # Support root webhook URLs from Telegram Bot API
     app.include_router(ws_router, prefix=v1_prefix)

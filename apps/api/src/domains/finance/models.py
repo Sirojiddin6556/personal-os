@@ -112,7 +112,7 @@ class Transaction(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
 
     __table_args__ = (
         CheckConstraint(
-            "type IN ('income','expense','transfer','reversal')",
+            "type IN ('income','expense','transfer','reversal','reconciliation')",
             name="chk_transactions_type",
         ),
         CheckConstraint(
@@ -134,7 +134,7 @@ class Budget(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    currency: Mapped[str] = mapped_column(String(3), default="RUB", nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), default="UZS", nullable=False)
     period_type: Mapped[str] = mapped_column(Text, default="monthly", nullable=False)
 
 

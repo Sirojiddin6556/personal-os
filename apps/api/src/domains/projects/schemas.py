@@ -4,7 +4,7 @@ from datetime import date, datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class GoalCreate(BaseModel):
@@ -12,8 +12,15 @@ class GoalCreate(BaseModel):
     description: Optional[str] = None
     category: str = "general"
     target_date: Optional[date] = None
-    status: str = Field(default="active", pattern="^(active|completed|paused|archived)$")
+    status: str = Field(default="active", pattern="^(planning|active|on_hold|completed|archived)$")
     progress_percentage: int = Field(default=0, ge=0, le=100)
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, v: Optional[str]) -> Optional[str]:
+        if v == "paused":
+            return "on_hold"
+        return v
 
 
 class GoalUpdate(BaseModel):
@@ -21,8 +28,16 @@ class GoalUpdate(BaseModel):
     description: Optional[str] = None
     category: Optional[str] = None
     target_date: Optional[date] = None
-    status: Optional[str] = Field(default=None, pattern="^(active|completed|paused|archived)$")
+    status: Optional[str] = Field(default=None, pattern="^(planning|active|on_hold|completed|archived)$")
     progress_percentage: Optional[int] = Field(default=None, ge=0, le=100)
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, v: Optional[str]) -> Optional[str]:
+        if v == "paused":
+            return "on_hold"
+        return v
+
 
 
 class GoalResponse(BaseModel):
@@ -46,10 +61,17 @@ class ProjectCreate(BaseModel):
     goal_id: Optional[UUID] = None
     color: str = Field(default="#3B82F6", pattern="^#[0-9A-Fa-f]{6}$")
     icon: Optional[str] = None
-    status: str = Field(default="active", pattern="^(active|completed|on_hold|archived)$")
+    status: str = Field(default="active", pattern="^(planning|active|on_hold|completed|archived)$")
     target_date: Optional[date] = None
     github_repo: Optional[str] = None
     github_default_branch: Optional[str] = "main"
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, v: Optional[str]) -> Optional[str]:
+        if v == "paused":
+            return "on_hold"
+        return v
 
 
 class ProjectUpdate(BaseModel):
@@ -58,10 +80,18 @@ class ProjectUpdate(BaseModel):
     goal_id: Optional[UUID] = None
     color: Optional[str] = Field(default=None, pattern="^#[0-9A-Fa-f]{6}$")
     icon: Optional[str] = None
-    status: Optional[str] = Field(default=None, pattern="^(active|completed|on_hold|archived)$")
+    status: Optional[str] = Field(default=None, pattern="^(planning|active|on_hold|completed|archived)$")
     target_date: Optional[date] = None
     github_repo: Optional[str] = None
     github_default_branch: Optional[str] = None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def normalize_status(cls, v: Optional[str]) -> Optional[str]:
+        if v == "paused":
+            return "on_hold"
+        return v
+
 
 
 class ProjectResponse(BaseModel):

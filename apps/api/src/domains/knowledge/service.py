@@ -254,6 +254,25 @@ class KnowledgeService:
         res = await session.execute(stmt)
         return list(res.scalars().all())
 
+    async def delete_note(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        note_id: UUID,
+    ) -> None:
+        note = await self.get_note(session, workspace_id, note_id)
+        note.is_archived = True
+        await publish_event(
+            session=session,
+            event_type="knowledge.note_deleted.v1",
+            aggregate_type="note",
+            aggregate_id=note.id,
+            workspace_id=workspace_id,
+            data={"title": note.title},
+        )
+        await session.commit()
+
+
     async def search_notes(
         self,
         session: AsyncSession,

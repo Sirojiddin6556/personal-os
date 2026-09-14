@@ -49,3 +49,7 @@ pnpm-debug.log*
 
 # Alembic
 alembic/versions/__pycache__/
+
+# Test reports
+playwright-report/
+test-results/

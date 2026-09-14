@@ -3,14 +3,16 @@
 import React from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Task } from '@/types/domain';
+import { Task, TaskStatus } from '@/types/domain';
 import { cn, formatDateShort } from '@/lib/utils';
+import { useProjects } from '@/hooks/useGitHub';
 
 export interface TaskCardProps {
   task: Task;
   onComplete: (id: string) => void;
   onEdit: (id: string) => void;
   onDelete?: (id: string) => void;
+  onStatusChange?: (newStatus: TaskStatus) => void;
   isDragging?: boolean;
 }
 
@@ -19,8 +21,11 @@ export function TaskCard({
   onComplete,
   onEdit,
   onDelete,
+  onStatusChange,
   isDragging: isCustomDragging,
 }: TaskCardProps) {
+  const { data: dbProjects = [] } = useProjects();
+  const linkedProject = task.project || dbProjects.find((p) => p.id === task.project_id);
   const {
     attributes,
     listeners,
@@ -51,7 +56,10 @@ export function TaskCard({
     (s) => s.is_completed || (s as unknown as { completed: boolean }).completed
   ).length;
 
-  const isCompleted = task.status === 'done' || task.status === 'canceled';
+  const isCompleted =
+    task.status === 'done' ||
+    task.status === 'cancelled' ||
+    task.status === 'archived';
 
   const normalizedPriority = String(task.priority || 'medium').toLowerCase();
   const priorityClass =
@@ -98,20 +106,40 @@ export function TaskCard({
           </button>
 
           {/* Project Tag */}
-          {task.project && (
+          {linkedProject && (
             <span
-              className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 truncate"
+              className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 truncate max-w-[150px]"
             >
               <span
                 className="w-1.5 h-1.5 rounded-full shrink-0"
-                style={{ backgroundColor: task.project.color || '#6366f1' }}
+                style={{ backgroundColor: linkedProject.color || '#6366f1' }}
               />
-              <span className="truncate">#{task.project.name}</span>
+              <span className="truncate">#{linkedProject.name}</span>
             </span>
           )}
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
+          {/* Accessible Status Transition Selector */}
+          {onStatusChange && !isCompleted && (
+            <select
+              aria-label={`Изменить статус задачи ${task.title}`}
+              value={task.status}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => {
+                e.stopPropagation();
+                onStatusChange(e.target.value as TaskStatus);
+              }}
+              className="text-[10px] bg-surface-muted hover:bg-surface border border-border rounded px-1 py-0.5 text-text-secondary hover:text-text-primary focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+            >
+              <option value="inbox">Inbox</option>
+              <option value="todo">Todo</option>
+              <option value="scheduled">Scheduled</option>
+              <option value="in_progress">In Progress</option>
+              <option value="waiting">Waiting</option>
+            </select>
+          )}
+
           {/* Priority Badge */}
           <span
             className={cn(

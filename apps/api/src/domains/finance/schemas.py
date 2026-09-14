@@ -18,8 +18,12 @@ class AccountUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     type: Optional[str] = Field(None, pattern="^(checking|savings|credit_card|cash|investment|crypto)$")
     currency: Optional[str] = Field(None, min_length=3, max_length=3)
-    balance_minor: Optional[int] = None
     is_archived: Optional[bool] = None
+
+
+class ReconcileAccountRequest(BaseModel):
+    actual_balance_minor: int
+    reason: str = Field(min_length=3, max_length=255, description="Reason for reconciliation")
 
 
 class AccountResponse(BaseModel):

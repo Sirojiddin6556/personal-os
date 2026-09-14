@@ -1,10 +1,34 @@
-"""Unit tests for Stage 10: Backend Developer implementations."""
-
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
+import jwt
 import pytest
 
+from src.config import settings
+from src.domains.identity.models import Membership, User, Workspace
+from src.domains.identity.schemas import (
+    UserLoginRequest,
+    UserRegisterRequest,
+    WorkspaceCreateRequest,
+)
+from src.domains.identity.service import (
+    create_access_token,
+    hash_password,
+    identity_service,
+    verify_password,
+)
+from src.domains.planner.models import DailyJournal, Habit, HabitLog, PlannerReminder
+from src.domains.planner.schemas import (
+    DailyJournalInput,
+    HabitCreate,
+    HabitResponse,
+    HabitUpdate,
+    PlannerReminderCreate,
+)
+from src.domains.planner.service import planner_service
+from src.domains.projects.models import Goal, Milestone, Project
+from src.domains.projects.schemas import GoalCreate, MilestoneCreate, ProjectCreate
+from src.domains.projects.service import project_service
 from src.domains.tasks.models import Task, TaskStatus, Priority
 from src.domains.tasks.schemas import TaskCreate, TaskUpdate, TaskResponse
 from src.domains.tasks.service import task_service
@@ -13,9 +37,24 @@ from src.domains.finance.schemas import TransactionCreate, AccountResponse
 from src.domains.finance.service import finance_service
 from src.domains.dashboard.service import calculate_free_windows, get_day_bounds
 from src.domains.calendar.schemas import EventResponse
-from src.shared.exceptions import ConflictError, NotFoundError
+from src.shared.deps import parse_etag
+from src.shared.exceptions import (
+    BadRequestError,
+    ConflictError,
+    NotFoundError,
+    OptimisticLockError,
+    PreconditionFailedError,
+    PreconditionRequiredError,
+    UnauthorizedError,
+)
 from src.shared.pagination import CursorPage, encode_cursor, decode_cursor
 from src.ws.router import authenticate_ws
+
+
+def create_mock_session():
+    s = AsyncMock()
+    s.add = MagicMock()
+    return s
 
 
 def test_task_models_and_schemas():
@@ -157,7 +196,7 @@ def test_dashboard_calculations():
 @pytest.mark.asyncio
 async def test_task_service_create():
     """Test task creation logic with outbox publishing and session commit."""
-    session = AsyncMock()
+    session = create_mock_session()
     workspace_id = uuid4()
     body = TaskCreate(
         title="New Task",
@@ -177,7 +216,7 @@ async def test_task_service_create():
 @pytest.mark.asyncio
 async def test_task_service_optimistic_locking_conflict():
     """Test task update version conflict detection."""
-    session = AsyncMock()
+    session = create_mock_session()
     workspace_id = uuid4()
     task_id = uuid4()
 
@@ -193,15 +232,36 @@ async def test_task_service_optimistic_locking_conflict():
     session.execute.return_value = mock_result
 
     body = TaskUpdate(title="Updated Title")
-    # Client sends version 1 (mismatched)
-    with pytest.raises(ConflictError):
+    # Client sends version 1 (mismatched) -> RFC 9110 Precondition Failed (412)
+    with pytest.raises(OptimisticLockError) as exc_info:
         await task_service.update(session, task_id, workspace_id, body, version=1)
+    assert exc_info.value.status == 412
+    assert exc_info.value.extensions["code"] == "STALE_VERSION"
+
+
+def test_parse_etag_rfc_status_codes():
+    """Verify parse_etag raises 428 when missing and 400 when malformed or weak."""
+    assert parse_etag('"5"') == 5
+    assert parse_etag('"12"') == 12
+
+    # Missing If-Match -> 428 Precondition Required (RFC 6585)
+    with pytest.raises(PreconditionRequiredError) as req_exc:
+        parse_etag(None)
+    assert req_exc.value.status == 428
+    assert req_exc.value.extensions["code"] == "PRECONDITION_REQUIRED"
+
+    # Malformed / Weak / Wildcard / List -> 400 Bad Request (RFC 9110)
+    for invalid_header in ["abc", "*", 'W/"1"', 'w/"2"', '"1", "2"']:
+        with pytest.raises(BadRequestError) as bad_exc:
+            parse_etag(invalid_header)
+        assert bad_exc.value.status == 400
+        assert bad_exc.value.extensions["code"] == "INVALID_ETAG"
 
 
 @pytest.mark.asyncio
 async def test_finance_post_and_reverse_transaction():
     """Test financial ledger posting and reversing with balance adjustments."""
-    session = AsyncMock()
+    session = create_mock_session()
     workspace_id = uuid4()
     account_id = uuid4()
 
@@ -230,6 +290,204 @@ async def test_finance_post_and_reverse_transaction():
     tx = await finance_service.post_transaction(session, workspace_id, body)
     assert tx.amount_minor == 2500
     assert tx.status == "posted"
-    # Balance must be decreased from 10000 to 7500
     assert mock_account.balance_minor == 7500
     assert session.commit.called
+
+
+# =====================================================================
+# Identity & Cryptographic Password / JWT Tests
+# =====================================================================
+
+def test_password_hashing_and_verification():
+    raw_password = "SuperSecretPassword123!"
+    hashed = hash_password(raw_password)
+    assert hashed != raw_password
+    assert hashed.startswith("$2b$")
+    assert verify_password(raw_password, hashed) is True
+    assert verify_password("WrongPassword123!", hashed) is False
+    assert verify_password("", hashed) is False
+
+
+def test_create_access_token():
+    user_id = uuid4()
+    token_resp = create_access_token(user_id=user_id, expires_delta=timedelta(minutes=15))
+    assert token_resp.token_type == "Bearer"
+    assert token_resp.expires_in > 0
+    assert token_resp.access_token is not None
+
+    payload = jwt.decode(
+        token_resp.access_token,
+        settings.secret_key,
+        algorithms=[settings.jwt_algorithm],
+    )
+    assert payload["sub"] == str(user_id)
+    assert "exp" in payload
+
+
+@pytest.mark.asyncio
+async def test_identity_register_new_user_and_workspace():
+    session = create_mock_session()
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = None
+    session.execute.return_value = mock_res
+
+    req = UserRegisterRequest(
+        email="john.doe@example.com",
+        password="SecurePassword123!",
+        full_name="John Doe",
+        timezone="UTC",
+    )
+    with patch("src.domains.identity.service.publish_event", new=AsyncMock()) as mock_publish:
+        user = await identity_service.register(session, req)
+        assert user.email == "john.doe@example.com"
+        assert user.full_name == "John Doe"
+        assert verify_password("SecurePassword123!", user.password_hash)
+        assert session.add.call_count >= 3
+        assert mock_publish.called
+
+
+@pytest.mark.asyncio
+async def test_identity_register_duplicate_email_conflict():
+    session = create_mock_session()
+    existing_user = User(id=uuid4(), email="existing@example.com", password_hash="hashed")
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = existing_user
+    session.execute.return_value = mock_res
+
+    req = UserRegisterRequest(email="existing@example.com", password="Password123!", full_name="Existing User")
+    with pytest.raises(ConflictError):
+        await identity_service.register(session, req)
+
+
+@pytest.mark.asyncio
+async def test_identity_authenticate_success_and_failures():
+    session = create_mock_session()
+    raw_pwd = "MySecretPassword123"
+    hashed_pwd = hash_password(raw_pwd)
+    user = User(id=uuid4(), email="auth.test@example.com", password_hash=hashed_pwd, status="active", is_active=True)
+
+    # 1. Success
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = user
+    session.execute.return_value = mock_res
+    token_res = await identity_service.authenticate(session, UserLoginRequest(email="auth.test@example.com", password=raw_pwd))
+    assert token_res.access_token is not None
+    assert token_res.token_type == "Bearer"
+
+    # 2. Wrong password
+    with pytest.raises(UnauthorizedError):
+        await identity_service.authenticate(session, UserLoginRequest(email="auth.test@example.com", password="BadPassword!"))
+
+    # 3. User not found
+    mock_res_none = MagicMock()
+    mock_res_none.scalar_one_or_none.return_value = None
+    session.execute.return_value = mock_res_none
+    with pytest.raises(UnauthorizedError):
+        await identity_service.authenticate(session, UserLoginRequest(email="missing@example.com", password=raw_pwd))
+
+
+# =====================================================================
+# Planner Habits & Agenda Domain Tests
+# =====================================================================
+
+@pytest.mark.asyncio
+async def test_planner_create_habit():
+    session = create_mock_session()
+    workspace_id = uuid4()
+    data = HabitCreate(title="Drink 2L Water", description="Daily hydration", frequency_type="daily", target_count=2)
+    habit = await planner_service.create_habit(session, workspace_id, data)
+    assert habit.title == "Drink 2L Water"
+    assert habit.workspace_id == workspace_id
+    assert habit.current_streak == 0
+    assert habit.best_streak == 0
+    assert session.add.called
+
+
+@pytest.mark.asyncio
+async def test_planner_toggle_habit_streak_increment_and_decrement():
+    session = create_mock_session()
+    workspace_id = uuid4()
+    habit_id = uuid4()
+    now = datetime.now(timezone.utc)
+    today = date(2026, 9, 14)
+
+    habit = Habit(
+        id=habit_id,
+        workspace_id=workspace_id,
+        title="Morning Exercise",
+        frequency_type="daily",
+        target_count=1,
+        current_streak=2,
+        best_streak=2,
+        is_archived=False,
+        created_at=now,
+        updated_at=now,
+    )
+
+    # Step 1: Toggle ON
+    mock_habit_res = MagicMock()
+    mock_habit_res.scalar_one_or_none.return_value = habit
+    mock_log_res = MagicMock()
+    mock_log_res.scalar_one_or_none.return_value = None
+    session.execute.side_effect = [mock_habit_res, mock_log_res]
+
+    resp = await planner_service.toggle_habit_completion(session, workspace_id, habit_id, target_date=today)
+    assert resp.is_completed_today is True
+    assert resp.current_streak == 3
+    assert resp.best_streak == 3
+
+    # Step 2: Toggle OFF
+    existing_log = HabitLog(id=uuid4(), workspace_id=workspace_id, habit_id=habit_id, logged_date=today, count=1)
+    mock_log_res_exists = MagicMock()
+    mock_log_res_exists.scalar_one_or_none.return_value = existing_log
+    session.execute.side_effect = [mock_habit_res, mock_log_res_exists]
+
+    resp_off = await planner_service.toggle_habit_completion(session, workspace_id, habit_id, target_date=today)
+    assert resp_off.is_completed_today is False
+    assert resp_off.current_streak == 2
+    assert session.delete.called
+
+
+@pytest.mark.asyncio
+async def test_planner_journal_save_and_get():
+    session = create_mock_session()
+    workspace_id = uuid4()
+    entry_date = date(2026, 9, 14)
+    mock_res_none = MagicMock()
+    mock_res_none.scalar_one_or_none.return_value = None
+    session.execute.return_value = mock_res_none
+
+    input_data = DailyJournalInput(
+        entry_date=entry_date,
+        morning_intention="Focus on high leverage tasks",
+        evening_reflection="Completed Stage 3 and 4 successfully",
+        gratitude="Productive development",
+        mood="great",
+        productivity_rating=5,
+    )
+    entry = await planner_service.save_journal_entry(session, workspace_id, input_data)
+    assert entry.morning_intention == "Focus on high leverage tasks"
+    assert entry.productivity_rating == 5
+    assert session.add.called
+
+
+# =====================================================================
+# Projects & Goals Service Tests
+# =====================================================================
+
+@pytest.mark.asyncio
+async def test_projects_create_and_manage_goals():
+    session = create_mock_session()
+    workspace_id = uuid4()
+
+    proj_data = ProjectCreate(name="Personal OS Launch", description="Unified Life Dashboard", color="#6366f1")
+    proj = await project_service.create_project(session, workspace_id, proj_data)
+    assert proj.name == "Personal OS Launch"
+    assert proj.workspace_id == workspace_id
+
+    goal_data = GoalCreate(title="Hit 100 Daily Active Users", category="growth", progress_percentage=10)
+    goal = await project_service.create_goal(session, workspace_id, goal_data)
+    assert goal.title == "Hit 100 Daily Active Users"
+    assert goal.progress_percentage == 10
+
+

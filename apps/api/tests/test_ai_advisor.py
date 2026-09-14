@@ -50,6 +50,12 @@ from src.shared.deps import get_current_user, get_db_session, get_workspace
 from src.domains.identity.models import User, Workspace
 
 
+def create_mock_session():
+    s = AsyncMock()
+    s.add = MagicMock()
+    return s
+
+
 # =============================================================================
 # 1. RISK TIERS & POLICY ENGINE TESTS
 # =============================================================================
@@ -129,7 +135,7 @@ def test_prompt_injection_delimiters():
 @pytest.mark.asyncio
 async def test_tool_gateway_read_tools_and_telemetry():
     """Test ToolGateway read tools execute and log telemetry without database mutation."""
-    session = AsyncMock()
+    session = create_mock_session()
     workspace_id = uuid4()
     actor_id = uuid4()
     gateway = ToolGateway(session, workspace_id, actor_id)
@@ -171,7 +177,7 @@ async def test_tool_gateway_read_tools_and_telemetry():
 @pytest.mark.asyncio
 async def test_tool_gateway_medium_and_financial_mutations_require_confirmation():
     """Test that medium write and financial tools produce proposals with requires_confirmation=True."""
-    session = AsyncMock()
+    session = create_mock_session()
     workspace_id = uuid4()
     gateway = ToolGateway(session, workspace_id)
 
@@ -193,7 +199,7 @@ async def test_tool_gateway_medium_and_financial_mutations_require_confirmation(
 @pytest.mark.asyncio
 async def test_tool_gateway_dispatch_blocks_destructive_tool():
     """Test ToolGateway dispatch hard-blocks destructive tool calls."""
-    session = AsyncMock()
+    session = create_mock_session()
     workspace_id = uuid4()
     gateway = ToolGateway(session, workspace_id)
 
@@ -204,7 +210,7 @@ async def test_tool_gateway_dispatch_blocks_destructive_tool():
 @pytest.mark.asyncio
 async def test_tool_gateway_apply_confirmed():
     """Test apply_confirmed applies changes atomically using domain services."""
-    session = AsyncMock()
+    session = create_mock_session()
     workspace_id = uuid4()
     gateway = ToolGateway(session, workspace_id)
 
@@ -228,7 +234,7 @@ async def test_tool_gateway_apply_confirmed():
 @pytest.mark.asyncio
 async def test_quick_add_parser_expense():
     """Test parser correctly identifies financial expense intents."""
-    session = AsyncMock()
+    session = create_mock_session()
     workspace_id = uuid4()
 
     text = "Купил продукты на 2500 руб в супермаркете"
@@ -245,7 +251,7 @@ async def test_quick_add_parser_expense():
 @pytest.mark.asyncio
 async def test_quick_add_parser_task():
     """Test parser correctly identifies task intents and priorities."""
-    session = AsyncMock()
+    session = create_mock_session()
     workspace_id = uuid4()
 
     text = "Срочно подготовить презентацию архитектуры"
@@ -259,7 +265,7 @@ async def test_quick_add_parser_task():
 @pytest.mark.asyncio
 async def test_schedule_planner_lifecycle_create_and_apply():
     """Test full cycle of schedule planning: propose plan -> confirm and apply."""
-    session = AsyncMock()
+    session = create_mock_session()
     workspace_id = uuid4()
     actor_id = uuid4()
     task_id = uuid4()
@@ -344,7 +350,7 @@ async def test_embed_texts_produces_1536_dim_normalized_vector():
 @pytest.mark.asyncio
 async def test_rag_zero_cross_tenant_isolation():
     """Verify search_notes enforces workspace_id pre-filter in SQL before vector similarity."""
-    session = AsyncMock()
+    session = create_mock_session()
     workspace_a = uuid4()
 
     mock_chunk = NoteChunk(
@@ -383,7 +389,7 @@ async def test_api_parse_and_plans_endpoints():
     mock_user = User(id=user_id, email="user@personalos.org", full_name="Test User")
     mock_workspace = Workspace(id=workspace_id, name="Test Workspace", owner_id=user_id)
 
-    mock_session = AsyncMock()
+    mock_session = create_mock_session()
 
     app.dependency_overrides[get_current_user] = lambda: mock_user
     app.dependency_overrides[get_workspace] = lambda: mock_workspace

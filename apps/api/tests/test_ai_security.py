@@ -26,9 +26,35 @@ async def test_rag_cross_tenant_isolation(session, workspace_a_id, workspace_b_i
     assert len(chunks) == 0  # Нуль чужих chunks
 
 
-async def test_webhook_bad_signature_rejected(client: AsyncClient):
-    """Telegram webhook with wrong secret token returns 403"""
-    r = await client.post('/v1/webhooks/telegram/bot_token', 
-                         json={'update_id': 1, 'message': {'text': 'hello'}},
-                         headers={'X-Telegram-Bot-Api-Secret-Token': 'wrong_secret'})
-    assert r.status_code == 403
+async def test_webhook_bad_signature_rejected(client: AsyncClient, session, workspace_a_id):
+    """Telegram webhook with wrong secret token returns 403, and unknown webhook_id returns 404."""
+    from src.integrations.models import Integration
+
+    wh_id = uuid4()
+    integ = Integration(
+        id=uuid4(),
+        workspace_id=workspace_a_id,
+        provider="telegram",
+        status="connected",
+        config={
+            "webhook_id": str(wh_id),
+            "webhook_secret": "correct_secret_12345",
+        },
+    )
+    session.add(integ)
+
+    # 1. Test unknown webhook_id -> 404
+    r_unknown = await client.post(
+        f"/v1/webhooks/telegram/{uuid4()}",
+        json={"update_id": 1, "message": {"text": "hello"}},
+        headers={"X-Telegram-Bot-Api-Secret-Token": "correct_secret_12345"},
+    )
+    assert r_unknown.status_code == 404
+
+    # 2. Test wrong secret token -> 403
+    r_bad_secret = await client.post(
+        f"/v1/webhooks/telegram/{wh_id}",
+        json={"update_id": 1, "message": {"text": "hello"}},
+        headers={"X-Telegram-Bot-Api-Secret-Token": "wrong_secret"},
+    )
+    assert r_bad_secret.status_code == 403

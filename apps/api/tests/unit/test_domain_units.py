@@ -53,6 +53,12 @@ from src.shared.exceptions import (
 from src.shared.pagination import CursorPage, decode_cursor, encode_cursor
 
 
+def create_mock_session():
+    s = AsyncMock()
+    s.add = MagicMock()
+    return s
+
+
 # =============================================================================
 # 1. CALENDAR FREE SLOTS & DATE/TIME TIMEZONE TESTS
 # =============================================================================
@@ -327,7 +333,7 @@ def test_kanban_schemas_serialization():
 @pytest.mark.asyncio
 async def test_task_state_machine_transition_to_done_sets_completed_at():
     """State machine invariant: Moving task to DONE sets completed_at to now."""
-    session = AsyncMock()
+    session = create_mock_session()
     ws_id = uuid4()
     task_id = uuid4()
 
@@ -367,7 +373,7 @@ async def test_task_state_machine_transition_to_done_sets_completed_at():
 @pytest.mark.asyncio
 async def test_task_state_machine_reopening_done_task_clears_completed_at():
     """State machine invariant: Reopening DONE task (e.g. to todo) clears completed_at."""
-    session = AsyncMock()
+    session = create_mock_session()
     ws_id = uuid4()
     task_id = uuid4()
 
@@ -406,7 +412,7 @@ async def test_task_state_machine_reopening_done_task_clears_completed_at():
 @pytest.mark.asyncio
 async def test_task_state_machine_transition_to_cancelled_sets_cancelled_at():
     """State machine invariant: Moving task to CANCELLED sets cancelled_at."""
-    session = AsyncMock()
+    session = create_mock_session()
     ws_id = uuid4()
     task_id = uuid4()
 
@@ -445,7 +451,7 @@ async def test_task_state_machine_transition_to_cancelled_sets_cancelled_at():
 @pytest.mark.asyncio
 async def test_task_service_soft_delete_preserves_audit():
     """Soft-delete invariant: task is flagged is_deleted=True with version increment."""
-    session = AsyncMock()
+    session = create_mock_session()
     ws_id = uuid4()
     task_id = uuid4()
 
@@ -525,7 +531,7 @@ def test_transaction_model_invariants_and_synonyms():
 @pytest.mark.asyncio
 async def test_finance_post_income_increases_balance():
     """Posting income increases account.balance_minor by amount_minor."""
-    session = AsyncMock()
+    session = create_mock_session()
     ws_id = uuid4()
     acc_id = uuid4()
 
@@ -559,7 +565,7 @@ async def test_finance_post_income_increases_balance():
 @pytest.mark.asyncio
 async def test_finance_post_transfer_updates_both_accounts():
     """Posting transfer decreases source and increases destination account balance."""
-    session = AsyncMock()
+    session = create_mock_session()
     ws_id = uuid4()
     src_id = uuid4()
     dest_id = uuid4()
@@ -635,7 +641,7 @@ def test_finance_post_transfer_requires_destination_account_id():
 @pytest.mark.asyncio
 async def test_finance_reverse_non_posted_transaction_raises_conflict():
     """Only posted transactions can be reversed; draft/reversed raises ConflictError."""
-    session = AsyncMock()
+    session = create_mock_session()
     ws_id = uuid4()
     tx_id = uuid4()
 
@@ -661,7 +667,7 @@ async def test_finance_reverse_non_posted_transaction_raises_conflict():
 @pytest.mark.asyncio
 async def test_finance_reverse_expense_restores_balance_and_creates_reversal():
     """Reversing posted expense restores balance and marks original as reversed."""
-    session = AsyncMock()
+    session = create_mock_session()
     ws_id = uuid4()
     tx_id = uuid4()
     acc_id = uuid4()
@@ -759,7 +765,7 @@ def test_tool_gateway_risk_tier_classifications():
 
 def test_tool_gateway_risk_evaluation_unknown_tool_defaults_to_destructive():
     """Any unregistered tool must default to RiskTier.DESTRUCTIVE."""
-    session = AsyncMock()
+    session = create_mock_session()
     gateway = ToolGateway(session, workspace_id=uuid4())
 
     tier = gateway.evaluate_risk("random_unregistered_tool", {})
@@ -768,7 +774,7 @@ def test_tool_gateway_risk_evaluation_unknown_tool_defaults_to_destructive():
 
 def test_tool_gateway_evaluate_risk_detects_sql_injection():
     """Attempting SQL injection in tool args raises ValidationDomainError."""
-    session = AsyncMock()
+    session = create_mock_session()
     gateway = ToolGateway(session, workspace_id=uuid4())
 
     injection_patterns = [
@@ -787,7 +793,7 @@ def test_tool_gateway_evaluate_risk_detects_sql_injection():
 @pytest.mark.asyncio
 async def test_tool_gateway_dispatch_hard_blocks_destructive_tool():
     """Dispatching destructive tools raises ForbiddenError and logs blocked status."""
-    session = AsyncMock()
+    session = create_mock_session()
     gateway = ToolGateway(session, workspace_id=uuid4())
 
     destructive_calls = [
@@ -804,7 +810,7 @@ async def test_tool_gateway_dispatch_hard_blocks_destructive_tool():
 @pytest.mark.asyncio
 async def test_tool_gateway_mutations_require_confirmation():
     """Mutating tool calls return payload with requires_confirmation=True."""
-    session = AsyncMock()
+    session = create_mock_session()
     gateway = ToolGateway(session, workspace_id=uuid4())
 
     # 1. move_task
@@ -876,3 +882,38 @@ def test_cursor_pagination_encode_decode_roundtrip():
     decoded = decode_cursor(encoded)
     assert decoded["updated_at"] == payload["updated_at"]
     assert decoded["id"] == payload["id"]
+
+
+def test_goal_and_project_schemas_status_normalization():
+    """Verify that GoalCreate, GoalUpdate, ProjectCreate, and ProjectUpdate normalize 'paused' to 'on_hold'."""
+    from src.domains.projects.schemas import (
+        GoalCreate,
+        GoalUpdate,
+        ProjectCreate,
+        ProjectUpdate,
+    )
+
+    g_create = GoalCreate(title="Test Strategic Goal", status="paused")
+    assert g_create.status == "on_hold"
+
+    g_update = GoalUpdate(status="paused")
+    assert g_update.status == "on_hold"
+
+    p_create = ProjectCreate(name="Test Project", status="paused")
+    assert p_create.status == "on_hold"
+
+    p_update = ProjectUpdate(status="paused")
+    assert p_update.status == "on_hold"
+
+    # Verify canonical statuses are unchanged
+    for canonical in ["planning", "active", "on_hold", "completed", "archived"]:
+        assert GoalCreate(title="Valid", status=canonical).status == canonical
+        assert ProjectCreate(name="Valid", status=canonical).status == canonical
+
+    # Verify invalid status raises validation error
+    with pytest.raises(ValidationError):
+        GoalCreate(title="Invalid", status="in_progress")
+
+    with pytest.raises(ValidationError):
+        ProjectCreate(name="Invalid", status="blocked")
+

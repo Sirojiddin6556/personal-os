@@ -1,144 +1,162 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { apiRequest } from '@/lib/api-client';
+import { queryKeys } from '@/lib/query-keys';
+import { useTasks } from '@/hooks/useTasks';
+import { useAccounts } from '@/hooks/useFinance';
 import { Task, TaskStatus, CalendarEvent, BudgetSummary } from '@/types/domain';
-
 import { MorningBrief } from '@/types/ai';
 
+interface ApiDashboardToday {
+  events?: Array<{
+    id: string;
+    title: string;
+    start_time?: string;
+    end_time?: string;
+    start?: string;
+    end?: string;
+    is_external?: boolean;
+    color?: string;
+  }>;
+  top_tasks?: Task[];
+  overdue_count?: number;
+  budget_summary?: {
+    total_balance_minor: number;
+    currency: string;
+    active_accounts_count: number;
+  };
+}
+
 export function useDashboardToday() {
-  const [brief, setBrief] = useState<MorningBrief | null>({
-    id: 'brief-today',
-    date: new Date().toISOString().split('T')[0],
-    stats: {
-      events_count: 2,
-      tasks_count: 4,
-      free_hours: 3.5,
-      critical_tasks_count: 1,
+  const { tasks, isLoading: tasksLoading } = useTasks();
+  const { accounts, isLoading: accountsLoading } = useAccounts();
+
+  const totalBalanceMinor = useMemo(() => {
+    return accounts.reduce((sum, acc) => sum + (acc.balance_minor || 0), 0);
+  }, [accounts]);
+
+  const [dismissedBrief, setDismissedBrief] = useState(false);
+
+  // 1. Fetch dashboard overview from backend API
+  const { data: apiDashboard, isLoading: dashboardLoading } = useQuery<ApiDashboardToday>({
+    queryKey: queryKeys.dashboard.today(),
+    queryFn: async () => {
+      try {
+        return await apiRequest<ApiDashboardToday>('GET', '/dashboard/today');
+      } catch {
+        return { events: [], top_tasks: [], overdue_count: 0 };
+      }
     },
-    proposed_schedule: [
-      { id: 'sb-1', time: '09:30 — 11:00', title: 'Фокус: Подготовка отчета по выручке', type: 'task' },
-      { id: 'sb-2', time: '11:30 — 12:30', title: 'Team Sync (Встреча)', type: 'meeting' },
-      { id: 'sb-3', time: '14:00 — 15:30', title: 'Миграция БД PostgreSQL', type: 'task' },
-    ],
-    ai_comment:
-      'Начните с квартального отчёта до 11:00 — после начнётся командный митинг и фокусное время сократится.',
+    staleTime: 30 * 1000,
   });
 
-  const [topTasks] = useState<Task[]>([
-    {
-      id: 'task-1',
-      title: 'Подготовить отчёт по квартальной выручке',
-      status: 'in_progress',
-      priority: 'high',
-      due_at: new Date(Date.now() + 4 * 3600 * 1000).toISOString(),
-      project: { id: 'p-work', name: 'work', color: '#6366f1' },
-      subtasks: [
-        { id: 's1', title: '1C выгрузка', completed: true },
-        { id: 's2', title: 'P&L таблица', completed: false },
-      ],
-      sort_order: 1,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'task-2',
-      title: 'Запустить миграцию базы данных PostgreSQL 16',
-      status: TaskStatus.TODO,
-      priority: 'critical',
-      due_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(), // Overdue
-      project: { id: 'p-infra', name: 'infra', color: '#ef4444' },
-      sort_order: 2,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    {
-      id: 'task-4',
-      title: 'Ревью архитектуры UI компонентов (PR #42)',
-      status: TaskStatus.INBOX,
-      priority: 'high',
-      due_at: new Date(Date.now() + 6 * 3600 * 1000).toISOString(),
-      project: { id: 'p-frontend', name: 'frontend', color: '#0ea5e9' },
-      sort_order: 3,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-  ]);
+  // 2. Compute dynamic top tasks and overdue tasks from actual domain tasks
+  const topTasks = useMemo(() => {
+    if (tasks && tasks.length > 0) {
+      return tasks.filter((t) => t.status !== TaskStatus.DONE).slice(0, 3);
+    }
+    return apiDashboard?.top_tasks || [];
+  }, [tasks, apiDashboard]);
 
-  const [overdueTasks] = useState<Task[]>([
-    {
-      id: 'task-2',
-      title: 'Запустить миграцию базы данных PostgreSQL 16',
-      status: TaskStatus.TODO,
-      priority: 'critical',
-      due_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
-      project: { id: 'p-infra', name: 'infra', color: '#ef4444' },
-      sort_order: 2,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-  ]);
+  const overdueTasks = useMemo(() => {
+    if (tasks && tasks.length > 0) {
+      const now = new Date();
+      return tasks.filter(
+        (t) =>
+          t.status !== TaskStatus.DONE &&
+          t.due_at &&
+          new Date(t.due_at).getTime() < now.getTime()
+      );
+    }
+    return [];
+  }, [tasks]);
 
-  const [agenda] = useState<CalendarEvent[]>([
-    {
-      id: 'ev-1',
-      title: 'Daily Standup с продуктовой командой',
-      start_time: '2026-09-11T10:00:00Z',
-      end_time: '2026-09-11T10:30:00Z',
-      start: '10:00',
-      end: '10:30',
-      is_external: false,
-      color: '#0ea5e9',
-    },
-    {
-      id: 'ev-2',
-      title: 'Team Sync (Google Calendar)',
-      start_time: '2026-09-11T11:30:00Z',
-      end_time: '2026-09-11T12:30:00Z',
-      start: '11:30',
-      end: '12:30',
-      is_external: true,
-      color: '#6366f1',
-    },
-    {
-      id: 'ev-3',
-      title: 'Архитектурный синк по Personal OS',
-      start_time: '2026-09-11T16:00:00Z',
-      end_time: '2026-09-11T17:00:00Z',
-      start: '16:00',
-      end: '17:00',
-      is_external: false,
-      color: '#10b981',
-    },
-  ]);
+  // 3. Compute dynamic agenda events
+  const agenda: CalendarEvent[] = useMemo(() => {
+    if (apiDashboard?.events && apiDashboard.events.length > 0) {
+      return apiDashboard.events.map((e) => ({
+        id: e.id,
+        title: e.title,
+        start_time: e.start_time || e.start || new Date().toISOString(),
+        end_time: e.end_time || e.end || new Date().toISOString(),
+        start: e.start || (e.start_time ? e.start_time.slice(11, 16) : '09:00'),
+        end: e.end || (e.end_time ? e.end_time.slice(11, 16) : '10:00'),
+        is_external: !!e.is_external,
+        color: e.color || '#0ea5e9',
+      }));
+    }
+    return [];
+  }, [apiDashboard]);
 
-  const [budgetSummary] = useState<BudgetSummary>({
-    daily_spent_minor: 120000,
-    monthly_spent_minor: 4250000,
-    monthly_limit_minor: 6000000,
-    spent: 42500,
-    limit: 60000,
-    currency: 'RUB',
-    percentage: 71,
-    remaining: 17500,
-    category: 'Все категории',
-  });
+  // 4. Compute dynamic budget summary from actual finance state
+  const budgetSummary: BudgetSummary = useMemo(() => {
+    const totalMinor = totalBalanceMinor || apiDashboard?.budget_summary?.total_balance_minor || 0;
+    const limitMinor = 1500000000; // 15,000,000 UZS baseline monthly budget
+    const spentMinor = Math.max(0, limitMinor - totalMinor);
+    const pct = limitMinor > 0 ? Math.min(100, Math.round((spentMinor / limitMinor) * 100)) : 0;
 
+    return {
+      daily_spent_minor: 0,
+      monthly_spent_minor: spentMinor,
+      monthly_limit_minor: limitMinor,
+      spent: Math.round(spentMinor / 100),
+      limit: Math.round(limitMinor / 100),
+      currency: 'UZS',
+      percentage: pct,
+      remaining: Math.max(0, Math.round((limitMinor - spentMinor) / 100)),
+      category: 'Все категории',
+    };
+  }, [totalBalanceMinor, apiDashboard]);
 
-  const dismissBrief = () => setBrief(null);
+  // 5. Morning Brief
+  const brief: MorningBrief | null = useMemo(() => {
+    if (dismissedBrief) return null;
+    const pendingTasks = topTasks.length;
+    const eventsCount = agenda.length;
+    if (pendingTasks === 0 && eventsCount === 0) return null;
+
+    return {
+      id: 'brief-today',
+      date: new Date().toISOString().split('T')[0],
+      stats: {
+        events_count: eventsCount,
+        tasks_count: pendingTasks,
+        free_hours: 4.0,
+        critical_tasks_count: topTasks.filter((t) => t.priority === 'critical' || t.priority === 'high').length,
+      },
+      proposed_schedule: topTasks.map((t, idx) => ({
+        id: `sched-${t.id || idx}`,
+        time: idx === 0 ? '09:30 — 11:00' : idx === 1 ? '11:30 — 12:30' : '14:00 — 15:30',
+        title: `Фокус: ${t.title}`,
+        type: 'task',
+      })),
+      ai_comment:
+        pendingTasks > 0
+          ? `Сфокусируйтесь на задаче «${topTasks[0]?.title}» до начала дневных встреч.`
+          : 'Все запланированные задачи выполнены! Отличная продуктивность.',
+    };
+  }, [dismissedBrief, topTasks, agenda]);
+
+  const totalTasksCount = tasks ? tasks.length : 0;
+  const completedTasksCount = tasks ? tasks.filter((t) => t.status === TaskStatus.DONE).length : 0;
 
   return {
     brief,
-    dismissBrief,
+    dismissBrief: () => setDismissedBrief(true),
     topTasks,
     overdueTasks,
     agenda,
     budgetSummary,
+    isLoading: tasksLoading || dashboardLoading,
     stats: {
-      totalTasks: 7,
-      completedTasks: 3,
+      totalTasks: totalTasksCount,
+      completedTasks: completedTasksCount,
       overdueCount: overdueTasks.length,
       eventsCount: agenda.length,
-      freeHours: 3.5,
+      freeHours: 4.0,
     },
   };
 }
+

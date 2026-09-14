@@ -34,7 +34,7 @@ jobs:
         working-directory: apps/api
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost/test_personal_os
-      - run: uv run pytest tests/ -v
+      - run: uv run pytest tests/ -v --cov=src --cov-report=term-missing --cov-fail-under=55
         working-directory: apps/api
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost/test_personal_os

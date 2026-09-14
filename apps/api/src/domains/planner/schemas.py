@@ -65,7 +65,7 @@ class DailyJournalResponse(DailyJournalInput):
 class PlannerReminderCreate(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     remind_at: datetime
-    remind_type: str = Field(default="custom", pattern="^(task|habit|event|custom)$")
+    remind_type: str = Field(default="custom", pattern="^(task|habit|event|water|custom)$")
     related_id: Optional[UUID] = None
 
 

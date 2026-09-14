@@ -49,12 +49,33 @@ class FinanceService:
         res = await session.execute(stmt)
         return list(res.scalars().all())
 
+    async def get_account(self, session: AsyncSession, workspace_id: UUID, account_id: UUID) -> Account:
+        stmt = select(Account).where(Account.workspace_id == workspace_id, Account.id == account_id)
+        res = await session.execute(stmt)
+        acc = res.scalar_one_or_none()
+        if not acc:
+            raise NotFoundError(resource="Account", identifier=account_id)
+        return acc
+
     async def delete_account(self, session: AsyncSession, workspace_id: UUID, account_id: UUID) -> None:
         stmt = select(Account).where(Account.workspace_id == workspace_id, Account.id == account_id)
         res = await session.execute(stmt)
         acc = res.scalar_one_or_none()
         if not acc:
-            raise NotFoundException("Account not found")
+            raise NotFoundError(resource="Account", identifier=account_id)
+
+        # Check if account has transactions
+        stmt_tx = select(Transaction).where(
+            Transaction.workspace_id == workspace_id,
+            (Transaction.account_id == account_id) | (Transaction.destination_account_id == account_id),
+        ).limit(1)
+        res_tx = await session.execute(stmt_tx)
+        if res_tx.scalar_one_or_none():
+            # Soft-delete by archiving to preserve ledger integrity
+            acc.is_archived = True
+            await session.commit()
+            return
+
         await session.delete(acc)
         await session.commit()
 
@@ -65,7 +86,7 @@ class FinanceService:
         res = await session.execute(stmt)
         acc = res.scalar_one_or_none()
         if not acc:
-            raise NotFoundException("Account not found")
+            raise NotFoundError(resource="Account", identifier=account_id)
 
         if body.name is not None:
             acc.name = body.name
@@ -73,15 +94,75 @@ class FinanceService:
             acc.type = body.type
         if body.currency is not None:
             acc.currency = body.currency
-        if body.balance_minor is not None:
-            acc.balance_minor = body.balance_minor
-            acc.current_balance_minor = body.balance_minor
         if body.is_archived is not None:
             acc.is_archived = body.is_archived
 
         await session.commit()
         await session.refresh(acc)
         return acc
+
+    async def reconcile_account(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        account_id: UUID,
+        actual_balance_minor: int,
+        reason: str,
+    ) -> Transaction:
+        """Create a reconciliation transaction to adjust account balance to actual_balance_minor."""
+        stmt = (
+            select(Account)
+            .where(Account.id == account_id, Account.workspace_id == workspace_id)
+            .with_for_update()
+        )
+        res = await session.execute(stmt)
+        acc = res.scalar_one_or_none()
+        if not acc:
+            raise NotFoundError(resource="Account", identifier=account_id)
+
+        delta = actual_balance_minor - acc.balance_minor
+        if delta == 0:
+            raise ConflictError(
+                title="No Adjustment Needed",
+                detail="Account balance is already equal to actual_balance_minor.",
+            )
+
+        now = datetime.now(timezone.utc)
+        acc.balance_minor = actual_balance_minor
+
+        tx = Transaction(
+            id=uuid4(),
+            workspace_id=workspace_id,
+            account_id=account_id,
+            amount_minor=abs(delta),
+            currency=acc.currency,
+            transaction_type="reconciliation",
+            status="posted",
+            note=f"Reconciliation ({'+' if delta > 0 else '-'}{abs(delta)}): {reason}",
+            occurred_at=now,
+            posted_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(tx)
+
+        await publish_event(
+            session=session,
+            event_type="finance.transaction.posted.v1",
+            aggregate_type="transaction",
+            aggregate_id=tx.id,
+            workspace_id=workspace_id,
+            data={
+                "transaction_id": str(tx.id),
+                "account_id": str(tx.account_id),
+                "amount_minor": tx.amount_minor,
+                "type": tx.transaction_type,
+                "status": tx.status,
+            },
+        )
+        await session.commit()
+        await session.refresh(tx)
+        return tx
 
     async def create_category(
         self, session: AsyncSession, workspace_id: UUID, body: CategoryCreate
@@ -277,6 +358,12 @@ class FinanceService:
             raise ConflictError(
                 title="Invalid Transaction State",
                 detail=f"Only posted transactions can be reversed. Current status is '{orig.status}'.",
+            )
+
+        if orig.transaction_type == "reversal":
+            raise ConflictError(
+                title="Invalid Transaction Type",
+                detail="Reversal transactions cannot be reversed.",
             )
 
         # 2. Обновить баланс обратно (SELECT FOR UPDATE)

@@ -16,6 +16,7 @@ export interface KanbanColumnProps {
   onCompleteTask: (id: string) => void;
   onEditTask: (id: string) => void;
   onDeleteTask?: (id: string) => void;
+  onStatusChange?: (taskId: string, newStatus: TaskStatus) => void;
 }
 
 export function KanbanColumn({
@@ -27,6 +28,7 @@ export function KanbanColumn({
   onCompleteTask,
   onEditTask,
   onDeleteTask,
+  onStatusChange,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id,
@@ -54,7 +56,7 @@ export function KanbanColumn({
             className="w-2.5 h-2.5 rounded-full shrink-0"
             style={{ backgroundColor: dotColor }}
           />
-          <h3 className="text-sm font-bold text-text-primary tracking-tight">{title}</h3>
+          <h2 className="text-sm font-bold text-text-primary tracking-tight">{title}</h2>
           <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-surface text-text-secondary border border-border shadow-2xs">
             {tasks.length}
           </span>
@@ -97,6 +99,7 @@ export function KanbanColumn({
                 onComplete={onCompleteTask}
                 onEdit={onEditTask}
                 onDelete={onDeleteTask}
+                onStatusChange={onStatusChange ? (newStatus) => onStatusChange(task.id, newStatus) : undefined}
               />
             ))
           )}

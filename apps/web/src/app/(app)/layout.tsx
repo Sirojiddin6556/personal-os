@@ -22,9 +22,17 @@ export default function AppLayout({
     const hasCookie = document.cookie.includes('personal_os_access_token=');
 
     if (!token && !hasCookie) {
-      // In development/test mode, if DEMO_MODE or BYPASS_AUTH is set, allow bypass
-      // Otherwise redirect to /login
-      const bypass = localStorage.getItem('personal_os_bypass_auth') === 'true';
+      // In production builds, bypass is strictly disabled.
+      // In development or test builds, check for explicit bypass flag.
+      const isProduction = process.env.NODE_ENV === 'production';
+      const isTestOrDev =
+        !isProduction &&
+        (process.env.NODE_ENV === 'development' ||
+          process.env.NEXT_PUBLIC_E2E_AUTH_BYPASS === 'true');
+
+      const bypass =
+        isTestOrDev && localStorage.getItem('personal_os_bypass_auth') === 'true';
+
       if (!bypass) {
         setIsAuthenticated(false);
         router.replace('/login');

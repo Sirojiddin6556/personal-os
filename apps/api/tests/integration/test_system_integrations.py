@@ -210,3 +210,44 @@ async def test_integration_finance_transaction_immutability(client: AsyncClient,
         headers=auth_headers,
     )
     assert patch_res.status_code in (400, 403, 404, 405, 409, 422)
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_and_planning_project_integration(client: AsyncClient, auth_headers):
+    """Test full integration lifecycle for reconciliation transactions and planning project status."""
+    # 1. Create account
+    acc_res = await client.post(
+        "/v1/finance/accounts",
+        json={"name": "Reconciliation Test Bank", "currency": "UZS"},
+        headers=auth_headers,
+    )
+    assert acc_res.status_code == 201
+    account = acc_res.json()
+    account_id = account["id"]
+
+    # 2. Reconcile account balance to 1,000,000 UZS minor units
+    rec_res = await client.post(
+        f"/v1/finance/accounts/{account_id}/reconcile",
+        json={"actual_balance_minor": 1000000, "reason": "Initial balance sync"},
+        headers=auth_headers,
+    )
+    assert rec_res.status_code == 200
+    rec_tx = rec_res.json()
+    assert rec_tx["transaction_type"] == "reconciliation"
+    assert rec_tx["amount_minor"] == 1000000
+
+    # 3. Verify account updated
+    acc_check = await client.get(f"/v1/finance/accounts/{account_id}", headers=auth_headers)
+    assert acc_check.status_code == 200
+    assert acc_check.json()["balance_minor"] == 1000000
+
+    # 4. Create project with status='planning'
+    proj_res = await client.post(
+        "/v1/projects",
+        json={"name": "Q4 Strategy Planning", "status": "planning", "color": "#10B981"},
+        headers=auth_headers,
+    )
+    assert proj_res.status_code == 201
+    proj_data = proj_res.json()
+    assert proj_data["status"] == "planning"
+    assert proj_data["name"] == "Q4 Strategy Planning"

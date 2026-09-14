@@ -161,20 +161,14 @@ export default function TasksPage() {
           value={projectFilter}
           onChange={(e) => setProjectFilter(e.target.value)}
           aria-label="Фильтр по проекту"
-          className="px-2.5 py-1.5 text-xs bg-surface-muted border border-border rounded-lg text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
+          className="px-2.5 py-1.5 text-xs bg-surface-muted border border-border rounded-lg text-text-primary focus:outline-none focus:ring-1 focus:ring-primary max-w-[200px] truncate"
         >
-          <option value="all">Все проекты</option>
-          <option value="work">#work</option>
-          <option value="personal">#personal</option>
-          <option value="infra">#infra</option>
-          <option value="frontend">#frontend</option>
-          {dbProjects
-            .filter((p) => !['work', 'personal', 'infra', 'frontend'].includes(p.name.toLowerCase()))
-            .map((p) => (
-              <option key={p.id} value={p.name}>
-                #{p.name}
-              </option>
-            ))}
+          <option value="all">Все проекты ({dbProjects.length})</option>
+          {dbProjects.map((p) => (
+            <option key={p.id} value={p.id}>
+              📁 {p.name}
+            </option>
+          ))}
         </select>
 
         {/* Status Filter (especially useful for List view) */}

@@ -161,7 +161,7 @@ describe('apiRequest function', () => {
     expect(init.headers['Idempotency-Key']).toBe('custom-idempotency-uuid');
   });
 
-  it('sets If-Match header formatted as weak ETag when version is supplied', async () => {
+  it('sets If-Match header formatted as strong numeric ETag when version is supplied', async () => {
     (global.fetch as any).mockResolvedValueOnce({
       ok: true,
       status: 200,
@@ -174,7 +174,7 @@ describe('apiRequest function', () => {
     });
 
     const [, init] = (global.fetch as any).mock.calls[0];
-    expect(init.headers['If-Match']).toBe('W/"2"');
+    expect(init.headers['If-Match']).toBe('"2"');
   });
 
   it('appends query parameters safely to endpoint URL', async () => {

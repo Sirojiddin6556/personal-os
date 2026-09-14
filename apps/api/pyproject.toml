@@ -23,8 +23,16 @@ dependencies = [
     "sentry-sdk[fastapi]>=2.3.0",
     "pyjwt>=2.8.0",
     "bcrypt>=4.1.0",
+    "pytest-cov>=5.0.0",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["."]
+addopts = "--cov=src --cov-report=term"
+markers = [
+    "staging: marks tests as staging E2E tests requiring live environment or staging credentials",
+    "external: marks tests making real HTTP requests to external third-party APIs (Telegram, Google)",
+]
+
+

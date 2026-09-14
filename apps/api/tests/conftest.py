@@ -14,6 +14,7 @@ from src.domains.finance.models import Account, Transaction
 from src.domains.identity.models import User, Workspace
 from src.domains.knowledge.models import Note, NoteChunk
 from src.domains.tasks.models import Priority, Task, TaskStatus
+from src.integrations.models import Integration
 from src.main import app
 from src.shared.deps import (
     get_current_user,
@@ -62,6 +63,7 @@ class InMemoryDB:
         self.transactions: Dict[UUID, Transaction] = {}
         self.notes: Dict[UUID, Note] = {}
         self.note_chunks: Dict[UUID, NoteChunk] = {}
+        self.integrations: Dict[UUID, Integration] = {}
         self.outbox: List[OutboxEvent] = []
 
     def clear(self):
@@ -70,6 +72,7 @@ class InMemoryDB:
         self.transactions.clear()
         self.notes.clear()
         self.note_chunks.clear()
+        self.integrations.clear()
         self.outbox.clear()
 
 
@@ -81,48 +84,27 @@ class FakeAsyncSession:
 
     def add(self, obj: Any) -> None:
         now = datetime.now(timezone.utc)
+        if hasattr(obj, "id") and getattr(obj, "id", None) is None:
+            obj.id = uuid4()
+        if hasattr(obj, "created_at") and getattr(obj, "created_at", None) is None:
+            obj.created_at = now
+        if hasattr(obj, "updated_at") and getattr(obj, "updated_at", None) is None:
+            obj.updated_at = now
+
         if isinstance(obj, Task):
-            if not getattr(obj, "id", None):
-                obj.id = uuid4()
             if not getattr(obj, "version", None):
                 obj.version = 1
-            if not getattr(obj, "created_at", None):
-                obj.created_at = now
-            if not getattr(obj, "updated_at", None):
-                obj.updated_at = now
             self.db.tasks[obj.id] = obj
         elif isinstance(obj, Account):
-            if not getattr(obj, "id", None):
-                obj.id = uuid4()
-            if not getattr(obj, "created_at", None):
-                obj.created_at = now
-            if not getattr(obj, "updated_at", None):
-                obj.updated_at = now
             self.db.accounts[obj.id] = obj
         elif isinstance(obj, Transaction):
-            if not getattr(obj, "id", None):
-                obj.id = uuid4()
-            if not getattr(obj, "created_at", None):
-                obj.created_at = now
-            if not getattr(obj, "updated_at", None):
-                obj.updated_at = now
             self.db.transactions[obj.id] = obj
         elif isinstance(obj, Note):
-            if not getattr(obj, "id", None):
-                obj.id = uuid4()
-            if not getattr(obj, "created_at", None):
-                obj.created_at = now
-            if not getattr(obj, "updated_at", None):
-                obj.updated_at = now
             self.db.notes[obj.id] = obj
         elif isinstance(obj, NoteChunk):
-            if not getattr(obj, "id", None):
-                obj.id = uuid4()
-            if not getattr(obj, "created_at", None):
-                obj.created_at = now
-            if not getattr(obj, "updated_at", None):
-                obj.updated_at = now
             self.db.note_chunks[obj.id] = obj
+        elif isinstance(obj, Integration):
+            self.db.integrations[obj.id] = obj
         elif isinstance(obj, OutboxEvent):
             self.db.outbox.append(obj)
 
@@ -144,6 +126,8 @@ class FakeAsyncSession:
             return self.db.accounts.get(ident)
         if entity_cls is Note:
             return self.db.notes.get(ident)
+        if entity_cls is Integration:
+            return self.db.integrations.get(ident)
         return None
 
     async def execute(self, statement: Any, *args, **kwargs) -> MockScalarResult:
@@ -163,8 +147,19 @@ class FakeAsyncSession:
                     continue
                 if "workspace" in k.lower():
                     target_ws = val_uuid
-                elif "id" in k.lower() or "account" in k.lower() or "task" in k.lower() or "transaction" in k.lower():
+                elif "id" in k.lower() or "account" in k.lower() or "task" in k.lower() or "transaction" in k.lower() or "integration" in k.lower():
                     target_id = val_uuid
+
+        # Handle Integration queries
+        if "from integrations" in sql:
+            filtered = list(self.db.integrations.values())
+            if target_id:
+                filtered = [i for i in filtered if i.id == target_id]
+            if target_ws:
+                filtered = [i for i in filtered if i.workspace_id == target_ws]
+            if "status" in sql and "connected" in sql:
+                filtered = [i for i in filtered if i.status == "connected"]
+            return MockScalarResult(filtered)
 
         # Handle Task queries
         if "from tasks" in sql:

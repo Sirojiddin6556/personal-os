@@ -10,22 +10,25 @@ from uuid import UUID, uuid4
 
 import httpx
 import jwt
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
 from src.db.session import set_tenant_context
+from fastapi.responses import RedirectResponse
+from src.integrations.crypto import crypto_service, encrypt_token
 from src.domains.identity.models import Workspace
-from src.integrations.crypto import encrypt_token
+from src.integrations.models import Integration, OAuthCredential, SyncState, WebhookSubscription
+from src.shared.deps import get_db_session, get_public_session, get_workspace
 from src.integrations.google_calendar.sync import (
+    full_sync,
     google_calendar_sync,
+    incremental_sync,
     run_full_sync,
     run_incremental_sync,
 )
-from src.integrations.models import Integration, OAuthCredential, WebhookSubscription
-from src.shared.deps import get_db_session, get_public_session, get_workspace
 
 router = APIRouter(prefix="/integrations/google", tags=["google-calendar"])
 
@@ -34,30 +37,115 @@ class GoogleSyncPayload(BaseModel):
     events: Optional[list[Dict[str, Any]]] = None
 
 
+class GoogleConfigureRequest(BaseModel):
+    client_id: str
+    client_secret: str
+
+
+@router.post("/configure")
+@router.post("/config")
+async def configure_google(
+    body: GoogleConfigureRequest,
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> Dict[str, Any]:
+    """Store Google OAuth Client ID and encrypted Client Secret for workspace."""
+    if not body.client_id.strip() or not body.client_secret.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Client ID и Client Secret обязательны для заполнения.",
+        )
+
+    stmt_integ = select(Integration).where(
+        Integration.workspace_id == workspace.id,
+        Integration.provider == "google_calendar",
+    )
+    res_integ = await session.execute(stmt_integ)
+    integration = res_integ.scalar_one_or_none()
+
+    enc = crypto_service.encrypt_token(body.client_secret.strip())
+    config_data = {
+        "client_id": body.client_id.strip(),
+        "enc_secret": enc["combined"].hex(),
+    }
+
+    if not integration:
+        integration = Integration(
+            id=uuid4(),
+            workspace_id=workspace.id,
+            provider="google_calendar",
+            status="disconnected",
+            config=config_data,
+        )
+        session.add(integration)
+    else:
+        integration.config = {**integration.config, **config_data}
+
+    await session.commit()
+    return {"status": "configured", "client_id": body.client_id.strip()}
+
+
+@router.get("/config")
+async def get_google_config(
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> Dict[str, Any]:
+    stmt_integ = select(Integration).where(
+        Integration.workspace_id == workspace.id,
+        Integration.provider == "google_calendar",
+    )
+    res_integ = await session.execute(stmt_integ)
+    integration = res_integ.scalar_one_or_none()
+
+    client_id = (integration.config.get("client_id") if integration else None) or settings.google_client_id
+    has_secret = bool((integration and integration.config.get("enc_secret")) or settings.google_client_secret)
+
+    return {
+        "configured": bool(client_id and has_secret),
+        "client_id": client_id or "",
+        "redirect_uri": settings.google_redirect_uri,
+        "status": integration.status if integration else "disconnected",
+    }
+
+
 @router.get("/authorize")
 @router.get("/auth-url")
 async def authorize(
+    session: AsyncSession = Depends(get_db_session),
     workspace: Workspace = Depends(get_workspace),
 ) -> Dict[str, str]:
-    """Generate Google OAuth URL with PKCE, offline access, and calendar scope.
+    """Generate Google OAuth URL with PKCE, offline access, and calendar scope."""
+    stmt_integ = select(Integration).where(
+        Integration.workspace_id == workspace.id,
+        Integration.provider == "google_calendar",
+    )
+    res_integ = await session.execute(stmt_integ)
+    integration = res_integ.scalar_one_or_none()
 
-    State payload is a cryptographically signed JWT containing workspace_id and code_verifier.
-    """
+    client_id = (integration.config.get("client_id") if integration else None) or settings.google_client_id
+
+    if not client_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google Client ID не настроен. Пожалуйста, введите Client ID и Client Secret в форме интеграции.",
+        )
+
     # 1. Generate PKCE code verifier and code challenge (RFC 7636)
     code_verifier = secrets.token_urlsafe(64)
     code_challenge_digest = hashlib.sha256(code_verifier.encode("utf-8")).digest()
     code_challenge = base64.urlsafe_b64encode(code_challenge_digest).decode("utf-8").replace("=", "")
 
-    # 2. Embed workspace_id and code_verifier in signed state JWT
+    # 2. Embed workspace_id and code_verifier in AES-256-GCM encrypted state (prevents code_verifier leakage)
+    import json
     state_payload = {
         "workspace_id": str(workspace.id),
         "code_verifier": code_verifier,
         "iat": int(time.time()),
         "exp": int(time.time()) + 600,  # 10 minutes validity
     }
-    state = jwt.encode(state_payload, settings.secret_key, algorithm=settings.jwt_algorithm)
+    enc_state = crypto_service.encrypt_token(json.dumps(state_payload))
+    state = base64.urlsafe_b64encode(enc_state["combined"]).decode("utf-8").rstrip("=")
 
-    client_id = settings.google_client_id or "google-client-id-dev"
     redirect_uri = settings.google_redirect_uri
     scopes = "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events"
 
@@ -83,62 +171,154 @@ async def callback(
     state: str,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_public_session),
-) -> Dict[str, str]:
-    """Verify state JWT, exchange authorization code for tokens, encrypt with AES-256-GCM, and launch full sync."""
-    # 1. Verify signed state JWT
+):
+    """Verify state JWT or AES-256-GCM ciphertext, exchange authorization code for tokens, encrypt with AES-256-GCM, and launch full sync."""
+    import json
+    # 1. Verify encrypted or signed state
     try:
-        payload = jwt.decode(state, settings.secret_key, algorithms=[settings.jwt_algorithm])
+        # First try AES-256-GCM encrypted state
+        pad_len = 4 - (len(state) % 4)
+        padded_state = state + ("=" * (pad_len % 4))
+        raw_combined = base64.urlsafe_b64decode(padded_state.encode("utf-8"))
+        decrypted_str = crypto_service.decrypt_token(raw_combined)
+        payload = json.loads(decrypted_str)
+        if payload.get("exp") and payload["exp"] < int(time.time()):
+            raise ValueError("State expired")
         workspace_id = UUID(payload["workspace_id"])
         code_verifier = payload.get("code_verifier")
-    except Exception as ex:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid or expired OAuth state parameter: {str(ex)}",
-        )
-
-    await set_tenant_context(session, workspace_id)
-
-    # 2. Exchange authorization code for tokens
-    if code.startswith("mock-") or not settings.google_client_id:
-        access_token = f"mock-access-token-{code}"
-        refresh_token = f"mock-refresh-token-{code}"
-        expires_in = 3600
-    else:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                "https://oauth2.googleapis.com/token",
-                data={
-                    "code": code,
-                    "client_id": settings.google_client_id,
-                    "client_secret": settings.google_client_secret,
-                    "redirect_uri": settings.google_redirect_uri,
-                    "grant_type": "authorization_code",
-                    "code_verifier": code_verifier,
-                },
+    except Exception:
+        # Fallback to JWS JWT for backwards compatibility
+        try:
+            payload = jwt.decode(state, settings.secret_key, algorithms=[settings.jwt_algorithm])
+            workspace_id = UUID(payload["workspace_id"])
+            code_verifier = payload.get("code_verifier")
+        except Exception as ex:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Недействительный или истекший параметр OAuth state: {str(ex)}",
             )
-            if resp.status_code != 200:
+
+    # Replay protection: Check and mark state as consumed (single-use)
+    state_fingerprint = hashlib.sha256(state.encode("utf-8")).hexdigest()
+    state_key = f"gcal:state_consumed:{state_fingerprint}"
+    _CONSUMED_STATES: set = getattr(router, "_consumed_states", set())
+    setattr(router, "_consumed_states", _CONSUMED_STATES)
+
+    try:
+        from src.shared.idempotency import idempotency_service
+        idemp_client = await idempotency_service.get_client()
+        if idemp_client:
+            is_first_use = await idemp_client.set(state_key, "1", nx=True, ex=600)
+            if not is_first_use:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Google token exchange failed: {resp.text}",
+                    detail="OAuth state уже был использован (защита от replay/повторного вызова). Пожалуйста, начните авторизацию заново.",
                 )
-            tokens = resp.json()
-            access_token = tokens["access_token"]
-            refresh_token = tokens.get("refresh_token")
-            expires_in = tokens.get("expires_in", 3600)
+        else:
+            if getattr(settings, "environment", "development") in ("production", "staging"):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Служба верификации OAuth временно недоступна. Повторите попытку позже.",
+                )
+            if state_fingerprint in _CONSUMED_STATES:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="OAuth state уже был использован. Пожалуйста, начните авторизацию заново.",
+                )
+            _CONSUMED_STATES.add(state_fingerprint)
+    except HTTPException:
+        raise
+    except Exception as ex:
+        if getattr(settings, "environment", "development") in ("production", "staging"):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Служба верификации OAuth временно недоступна. Повторите попытку позже.",
+            )
+        if state_fingerprint in _CONSUMED_STATES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="OAuth state уже был использован.",
+            )
+        _CONSUMED_STATES.add(state_fingerprint)
 
-    # 3. Encrypt tokens with AES-256-GCM
+    try:
+        await set_tenant_context(session, workspace_id)
+
+        # 2. Retrieve Client ID and Secret for this workspace
+        stmt_integ = select(Integration).where(
+            Integration.workspace_id == workspace_id,
+            Integration.provider == "google_calendar",
+        )
+        res_integ = await session.execute(stmt_integ)
+        integration = res_integ.scalar_one_or_none()
+    except Exception:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Не удалось открыть OAuth-сессию в базе данных. Проверьте PostgreSQL и tenant context.",
+        )
+
+    client_id = (integration.config.get("client_id") if integration else None) or settings.google_client_id
+    client_secret = settings.google_client_secret
+
+    if integration and integration.config.get("enc_secret"):
+        try:
+            combined_bytes = bytes.fromhex(integration.config["enc_secret"])
+            client_secret = crypto_service.decrypt_token(combined_bytes)
+        except Exception:
+            pass
+
+    # 3. Exchange authorization code for tokens
+    try:
+        if code.startswith("mock-") or not client_id:
+            access_token = f"mock-access-token-{code}"
+            refresh_token = f"mock-refresh-token-{code}"
+            expires_in = 3600
+        else:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    "https://oauth2.googleapis.com/token",
+                    data={
+                        "code": code,
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                        "redirect_uri": settings.google_redirect_uri,
+                        "grant_type": "authorization_code",
+                        "code_verifier": code_verifier,
+                    },
+                )
+                if resp.status_code != 200:
+                    # Do not echo the full Google response: it may contain
+                    # request identifiers or sensitive OAuth diagnostics.
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Google отклонил обмен OAuth-кода. Начните авторизацию заново и проверьте client/redirect URI.",
+                    )
+                tokens = resp.json()
+                access_token = tokens["access_token"]
+                refresh_token = tokens.get("refresh_token")
+                expires_in = tokens.get("expires_in", 3600)
+    except HTTPException:
+        raise
+    except httpx.RequestError as ex:
+        logger.warning("Google OAuth token request failed: %s", type(ex).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Не удалось связаться с Google для получения OAuth-токенов.",
+        )
+    except (httpx.HTTPError, KeyError, TypeError, ValueError) as ex:
+        logger.warning("Google OAuth token response could not be processed: %s", type(ex).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Не удалось получить OAuth-токены от Google.",
+        )
+
+    # 4. Encrypt tokens with AES-256-GCM
     enc_access = encrypt_token(access_token)
     enc_refresh = encrypt_token(refresh_token) if refresh_token else None
     token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
 
-    # 4. Upsert Integration record
-    stmt_integ = select(Integration).where(
-        Integration.workspace_id == workspace_id,
-        Integration.provider == "google_calendar",
-    )
-    res_integ = await session.execute(stmt_integ)
-    integration = res_integ.scalar_one_or_none()
-
+    # 5. Upsert Integration record
     if not integration:
         integration = Integration(
             id=uuid4(),
@@ -183,11 +363,18 @@ async def callback(
             cred.tag_refresh = enc_refresh["tag"]
         cred.token_expires_at = token_expires_at
 
-    await session.commit()
+    try:
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OAuth-токен получен, но не удалось безопасно сохранить подключение в базе данных.",
+        )
 
     # 6. Schedule full_sync background task
     background_tasks.add_task(run_full_sync, workspace_id)
-    return {"status": "connected"}
+    return RedirectResponse(url="http://localhost:3000/settings/integrations?google=connected")
 
 
 @router.post("/webhook")
@@ -240,6 +427,8 @@ async def google_webhook(
     return Response(status_code=200, content="OK")
 
 
+@router.delete("")
+@router.delete("/")
 @router.delete("/disconnect")
 async def disconnect(
     workspace: Workspace = Depends(get_workspace),
@@ -277,15 +466,76 @@ async def disconnect(
     return {"status": "disconnected"}
 
 
-@router.post("/sync")
-async def sync_calendar(
-    body: GoogleSyncPayload,
+@router.get("/sync-status")
+async def get_sync_status(
     session: AsyncSession = Depends(get_db_session),
     workspace: Workspace = Depends(get_workspace),
 ) -> Dict[str, Any]:
-    """Manual trigger sync route (supports inline test event payloads)."""
-    return await google_calendar_sync.sync_workspace_calendar(
-        session=session,
-        workspace_id=workspace.id,
-        incoming_events=body.events,
+    """Return a UI-safe snapshot of the Google Calendar connection state."""
+    stmt_integ = select(Integration).where(
+        Integration.workspace_id == workspace.id,
+        Integration.provider == "google_calendar",
     )
+    integration = (await session.execute(stmt_integ)).scalar_one_or_none()
+
+    if not integration or integration.status == "disconnected":
+        return {
+            "status": "disconnected",
+            "last_sync": None,
+            "synced_events_count": 0,
+            "error_message": None,
+        }
+
+    stmt_state = (
+        select(SyncState)
+        .where(
+            SyncState.workspace_id == workspace.id,
+            SyncState.integration_id == integration.id,
+            SyncState.provider == "google_calendar",
+        )
+        .order_by(SyncState.updated_at.desc())
+        .limit(1)
+    )
+    sync_state = (await session.execute(stmt_state)).scalar_one_or_none()
+    sync_status = sync_state.status if sync_state else None
+    status_value = "error" if integration.sync_error else (sync_status or "connected")
+    if status_value not in {"idle", "syncing", "connected", "error", "disconnected"}:
+        status_value = "connected"
+
+    last_sync = None
+    if sync_state and sync_state.last_synced_at:
+        last_sync = sync_state.last_synced_at.isoformat()
+    elif integration.last_synced_at:
+        last_sync = integration.last_synced_at.isoformat()
+
+    return {
+        "status": status_value,
+        "last_sync": last_sync,
+        "synced_events_count": 0,
+        "error_message": integration.sync_error,
+    }
+
+
+@router.post("/sync")
+async def sync_calendar(
+    background_tasks: BackgroundTasks,
+    body: Optional[GoogleSyncPayload] = Body(default=None),
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> Dict[str, Any]:
+    """Manual trigger sync route (supports inline test event payloads and background real Google Calendar sync)."""
+    if body is not None and body.events is not None:
+        return await google_calendar_sync.sync_workspace_calendar(
+            session=session,
+            workspace_id=workspace.id,
+            incoming_events=body.events,
+        )
+    
+    # Real Google Calendar sync in background with fast ACK
+    from src.integrations.google_calendar.sync import run_full_sync
+    background_tasks.add_task(run_full_sync, workspace.id)
+    return {
+        "status": "syncing",
+        "job_id": str(uuid4()),
+        "message": "Синхронизация с Google Calendar запущена.",
+    }

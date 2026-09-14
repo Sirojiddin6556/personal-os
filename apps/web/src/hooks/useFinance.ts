@@ -104,12 +104,12 @@ export interface UpdateAccountInput {
   name?: string;
   type?: string;
   currency?: string;
-  balance_minor?: number;
   is_archived?: boolean;
 }
 
 /**
- * Mutation hook for updating account details (name, type, currency, balance).
+ * Mutation hook for updating account metadata (name, type, currency).
+ * Direct balance edits are prohibited; use useReconcileAccount or financial transactions.
  */
 export function useUpdateAccount() {
   const queryClient = useQueryClient();
@@ -278,7 +278,7 @@ export function useCreateTransaction() {
         destination_account_id: newTxInput.destination_account_id ?? null,
         category_id: newTxInput.category_id ?? null,
         amount_minor: newTxInput.amount_minor,
-        currency: newTxInput.currency || 'RUB',
+        currency: newTxInput.currency || 'UZS',
         type: newTxInput.type,
         description: newTxInput.description,
         transaction_date:
@@ -411,7 +411,7 @@ export function useDashboardToday() {
       daily_spent_minor: 0,
       monthly_spent_minor: 0,
       monthly_limit_minor: 0,
-      currency: 'RUB',
+      currency: 'UZS',
     },
     data: query.data,
     isLoading: query.isLoading,
@@ -419,4 +419,28 @@ export function useDashboardToday() {
     error: query.error,
     refetch: query.refetch,
   };
+}
+
+export interface ReconcileAccountInput {
+  accountId: string;
+  actual_balance_minor: number;
+  reason?: string;
+}
+
+export function useReconcileAccount() {
+  const queryClient = useQueryClient();
+
+  return useMutation<Transaction, Error, ReconcileAccountInput>({
+    mutationFn: ({ accountId, actual_balance_minor, reason }) =>
+      apiRequest<Transaction, { actual_balance_minor: number; reason?: string }>(
+        'POST',
+        `/finance/accounts/${accountId}/reconcile`,
+        { body: { actual_balance_minor, reason: reason || 'Сверка остатка' } }
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.accounts() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.finance.all });
+      queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.today() });
+    },
+  });
 }

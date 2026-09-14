@@ -52,6 +52,50 @@ class ProjectService:
         res = await session.execute(stmt)
         return list(res.scalars().all())
 
+    async def get_goal(self, session: AsyncSession, workspace_id: UUID, goal_id: UUID) -> Goal:
+        stmt = select(Goal).where(Goal.id == goal_id, Goal.workspace_id == workspace_id)
+        res = await session.execute(stmt)
+        goal = res.scalar_one_or_none()
+        if not goal:
+            raise NotFoundError(resource="Goal", identifier=goal_id)
+        return goal
+
+    async def update_goal(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        goal_id: UUID,
+        body: GoalUpdate,
+    ) -> Goal:
+        goal = await self.get_goal(session, workspace_id, goal_id)
+        data = body.model_dump(exclude_unset=True)
+        for k, v in data.items():
+            setattr(goal, k, v)
+        await publish_event(
+            session=session,
+            event_type="goal.updated.v1",
+            aggregate_type="goal",
+            aggregate_id=goal.id,
+            workspace_id=workspace_id,
+            data={"title": goal.title, "status": goal.status},
+        )
+        await session.commit()
+        await session.refresh(goal)
+        return goal
+
+    async def delete_goal(self, session: AsyncSession, workspace_id: UUID, goal_id: UUID) -> None:
+        goal = await self.get_goal(session, workspace_id, goal_id)
+        await session.delete(goal)
+        await publish_event(
+            session=session,
+            event_type="goal.deleted.v1",
+            aggregate_type="goal",
+            aggregate_id=goal_id,
+            workspace_id=workspace_id,
+            data={"title": goal.title},
+        )
+        await session.commit()
+
     # --- Projects ---
     async def create_project(self, session: AsyncSession, workspace_id: UUID, body: ProjectCreate) -> Project:
         project = Project(
@@ -163,5 +207,50 @@ class ProjectService:
         res = await session.execute(stmt)
         return list(res.scalars().all())
 
+    async def get_milestone(self, session: AsyncSession, workspace_id: UUID, milestone_id: UUID) -> Milestone:
+        stmt = select(Milestone).where(Milestone.id == milestone_id, Milestone.workspace_id == workspace_id)
+        res = await session.execute(stmt)
+        m = res.scalar_one_or_none()
+        if not m:
+            raise NotFoundError(resource="Milestone", identifier=milestone_id)
+        return m
+
+    async def update_milestone(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        milestone_id: UUID,
+        body: MilestoneUpdate,
+    ) -> Milestone:
+        m = await self.get_milestone(session, workspace_id, milestone_id)
+        data = body.model_dump(exclude_unset=True)
+        for k, v in data.items():
+            setattr(m, k, v)
+        await publish_event(
+            session=session,
+            event_type="milestone.updated.v1",
+            aggregate_type="milestone",
+            aggregate_id=m.id,
+            workspace_id=workspace_id,
+            data={"title": m.title, "status": m.status},
+        )
+        await session.commit()
+        await session.refresh(m)
+        return m
+
+    async def delete_milestone(self, session: AsyncSession, workspace_id: UUID, milestone_id: UUID) -> None:
+        m = await self.get_milestone(session, workspace_id, milestone_id)
+        await session.delete(m)
+        await publish_event(
+            session=session,
+            event_type="milestone.deleted.v1",
+            aggregate_type="milestone",
+            aggregate_id=milestone_id,
+            workspace_id=workspace_id,
+            data={"title": m.title},
+        )
+        await session.commit()
+
 
 project_service = ProjectService()
+

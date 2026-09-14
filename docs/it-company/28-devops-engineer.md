@@ -236,15 +236,15 @@ volumes:
 ```
 On branch master
 Changes not staged for commit:
-	modified:   .gitignore
+    modified:   .gitignore
 Untracked files:
-	.github/workflows/cd.yml
-	.github/workflows/dependency-update.yml
-	.github/workflows/security-scan.yml
-	docs/it-company/28-devops-engineer.md
-	docs/runbooks/
-	infra/docker/docker-compose.worker.yml
-	infra/scripts/
+    .github/workflows/cd.yml
+    .github/workflows/dependency-update.yml
+    .github/workflows/security-scan.yml
+    docs/it-company/28-devops-engineer.md
+    docs/runbooks/
+    infra/docker/docker-compose.worker.yml
+    infra/scripts/
 ```
 REMAINING_ISSUES:
 - Настройка SSH-ключей развертывания и секретов окружения (`BACKUP_BUCKET`, `RESTORE_DATABASE_URL`) в настройках GitHub Secrets репозитория производится владельцем инфраструктуры на этапе настройки продакшн сервера.

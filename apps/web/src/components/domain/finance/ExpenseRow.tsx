@@ -41,7 +41,6 @@ export function ExpenseRow({ transaction, onClick }: ExpenseRowProps) {
 
   return (
     <div
-      role="row"
       onClick={() => onClick?.(transaction.id)}
       className={cn(
         'flex items-center justify-between p-3.5 bg-surface hover:bg-surface-muted/70 border-b border-border last:border-0 transition-colors duration-fast select-none',

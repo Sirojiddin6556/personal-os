@@ -13,7 +13,7 @@ from starlette.requests import Request
 
 from src.config import settings
 from src.domains.identity.models import Workspace
-from src.integrations.crypto import decrypt_token, encrypt_token
+from src.integrations.crypto import crypto_service, decrypt_token, encrypt_token
 from src.integrations.google_calendar.router import authorize, callback, disconnect, google_webhook
 from src.integrations.google_calendar.sync import (
     GoogleSyncTokenExpired,
@@ -39,6 +39,12 @@ from src.integrations.telegram.handler import (
     send_message,
 )
 from src.integrations.telegram.router import deduplicate_telegram_update, telegram_webhook
+
+
+def create_mock_session():
+    s = AsyncMock()
+    s.add = MagicMock()
+    return s
 
 
 # =====================================================================
@@ -101,7 +107,15 @@ def test_aes_gcm_tamper_detection():
 @pytest.mark.asyncio
 async def test_google_authorize_url_generation():
     workspace = Workspace(id=uuid4(), name="Test Workspace", slug="test-ws")
-    result = await authorize(workspace=workspace)
+    mock_integ = Integration(
+        id=uuid4(),
+        workspace_id=workspace.id,
+        provider="google_calendar",
+        config={"client_id": "test-client-id-123"},
+    )
+    mock_session = create_mock_session()
+    mock_session.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=mock_integ))
+    result = await authorize(session=mock_session, workspace=workspace)
 
     assert "auth_url" in result
     url = result["auth_url"]
@@ -111,9 +125,14 @@ async def test_google_authorize_url_generation():
     assert "access_type=offline" in url
     assert "state=" in url
 
-    # Parse state JWT
+    # Parse encrypted state (AES-256-GCM protected)
     state_param = url.split("state=")[1].split("&")[0]
-    decoded = jwt.decode(state_param, settings.secret_key, algorithms=[settings.jwt_algorithm])
+    import base64, json
+    pad_len = 4 - (len(state_param) % 4)
+    padded_state = state_param + ("=" * (pad_len % 4))
+    raw_combined = base64.urlsafe_b64decode(padded_state.encode("utf-8"))
+    decrypted_str = crypto_service.decrypt_token(raw_combined)
+    decoded = json.loads(decrypted_str)
     assert decoded["workspace_id"] == str(workspace.id)
     assert "code_verifier" in decoded
 
@@ -128,7 +147,7 @@ async def test_google_callback_exchanges_and_encrypts():
     }
     state = jwt.encode(state_payload, settings.secret_key, algorithm=settings.jwt_algorithm)
 
-    mock_session = AsyncMock()
+    mock_session = create_mock_session()
     mock_session.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
 
     bg_tasks = BackgroundTasks()
@@ -140,7 +159,7 @@ async def test_google_callback_exchanges_and_encrypts():
         session=mock_session,
     )
 
-    assert res == {"status": "connected"}
+    assert res.status_code in (200, 302, 307)
     assert mock_session.add.call_count >= 1
     assert mock_session.commit.called
     assert len(bg_tasks.tasks) == 1
@@ -185,7 +204,7 @@ async def test_google_full_and_incremental_sync_lifecycle():
         key_version=1,
     )
 
-    mock_session = AsyncMock()
+    mock_session = create_mock_session()
     # Mock no existing mapping
     mock_session.execute.return_value = MagicMock(
         scalar_one_or_none=MagicMock(return_value=None),
@@ -215,7 +234,7 @@ async def test_google_incremental_sync_410_fallback():
         tag_access=b"0" * 16,
     )
 
-    mock_session = AsyncMock()
+    mock_session = create_mock_session()
 
     with patch("src.integrations.google_calendar.sync.get_credentials", return_value=cred):
         with patch("src.integrations.google_calendar.sync.get_sync_token", return_value="expired-token"):
@@ -229,47 +248,210 @@ async def test_google_incremental_sync_410_fallback():
 
 
 # =====================================================================
-# 4. Telegram Webhook & Fast ACK Tests
+# 4. Telegram Webhook, Opaque UUID & Security Tests (12 Test Requirements)
 # =====================================================================
 
 @pytest.mark.asyncio
 async def test_telegram_deduplication():
     update_id = f"upd-{uuid4()}"
-
-    # First attempt: should pass
-    first_attempt = await deduplicate_telegram_update(update_id)
-    assert first_attempt is True
-
-    # Duplicate attempt: should be detected
-    second_attempt = await deduplicate_telegram_update(update_id)
-    assert second_attempt is False
+    assert await deduplicate_telegram_update(update_id) is True
+    assert await deduplicate_telegram_update(update_id) is False
 
 
 @pytest.mark.asyncio
-async def test_telegram_webhook_fast_ack():
-    bg_tasks = BackgroundTasks()
+async def test_telegram_connect_creates_unique_webhook_id_and_no_token_in_url():
+    """Req 1, 2, 3, 4: Connect generates unique UUID, no bot token in URL, passes secret_token to setWebhook."""
+    from src.integrations.telegram.router import TelegramConnectRequest, connect_telegram
 
-    scope = {
-        "type": "http",
-        "method": "POST",
-        "path": "/webhooks/telegram",
-        "headers": [(b"content-type", b"application/json")],
-    }
-    raw_body = b'{"update_id": 999123, "message": {"text": "hello", "chat": {"id": 12345}}}'
+    workspace = Workspace(id=uuid4(), name="Test WS", slug="test-ws", owner_id=uuid4())
+    mock_session = create_mock_session()
+    mock_session.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
 
-    async def receive():
-        return {"type": "http.request", "body": raw_body, "more_body": False}
+    bot_token = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+    base_url = "https://api.personal-os.com"
 
-    request = Request(scope=scope, receive=receive)
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"ok": True, "result": {"id": 123456, "username": "test_bot", "first_name": "Test"}}))
+        mock_post.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"ok": True, "result": True}))
 
-    res = await telegram_webhook(
-        request=request,
-        background_tasks=bg_tasks,
-        bot_token="test-token",
+        req = TelegramConnectRequest(bot_token=bot_token, webhook_url=base_url)
+        res = await connect_telegram(req, session=mock_session, workspace=workspace)
+
+        assert res["status"] == "connected"
+        webhook_id_1 = res["webhook_id"]
+        assert UUID(webhook_id_1)  # 1. Connect creates valid UUID
+
+        # 2. Ensure bot token is NEVER in the registered URL
+        assert bot_token not in res["webhook_url"]
+        assert f"/v1/webhooks/telegram/{webhook_id_1}" in res["webhook_url"]
+
+        # 3 & 4. setWebhook payload check
+        assert mock_post.called
+        post_kwargs = mock_post.call_args[1]
+        payload = post_kwargs.get("json", {})
+        assert payload["url"] == res["webhook_url"]
+        assert payload["url"].endswith(f"/v1/webhooks/telegram/{webhook_id_1}")
+        assert payload["secret_token"] is not None
+        assert len(payload["secret_token"]) > 20
+
+
+@pytest.mark.asyncio
+async def test_telegram_webhook_unknown_id_and_bad_secret_and_fast_ack():
+    """Req 5, 6, 7, 8: 404 on unknown ID, 403 on bad secret, Fast ACK on valid secret, deduplication."""
+    from src.integrations.telegram.router import telegram_webhook
+    from fastapi import HTTPException
+
+    wh_id = uuid4()
+    secret_token = "super_secure_secret_token_123"
+    integ = Integration(
+        id=uuid4(),
+        workspace_id=uuid4(),
+        provider="telegram",
+        status="connected",
+        config={"webhook_id": str(wh_id), "webhook_secret": secret_token},
     )
 
+    mock_session = create_mock_session()
+    mock_session.execute.return_value = MagicMock(
+        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[integ])))
+    )
+
+    bg_tasks = BackgroundTasks()
+
+    # 5. Unknown webhook_id -> 404
+    req_unknown = Request(scope={"type": "http", "method": "POST", "path": f"/webhooks/telegram/{uuid4()}", "headers": []})
+    with pytest.raises(HTTPException) as exc_404:
+        await telegram_webhook(webhook_id=str(uuid4()), request=req_unknown, background_tasks=bg_tasks, session=mock_session)
+    assert exc_404.value.status_code == 404
+
+    # 6. Wrong secret -> 403
+    async def wrong_sec_receive():
+        return {"type": "http.request", "body": b'{"update_id": 1001, "message": {"text": "hi"}}', "more_body": False}
+    req_bad = Request(
+        scope={"type": "http", "method": "POST", "path": f"/webhooks/telegram/{wh_id}", "headers": [(b"x-telegram-bot-api-secret-token", b"wrong_token")]},
+        receive=wrong_sec_receive,
+    )
+    with pytest.raises(HTTPException) as exc_403:
+        await telegram_webhook(webhook_id=str(wh_id), request=req_bad, background_tasks=bg_tasks, session=mock_session)
+    assert exc_403.value.status_code == 403
+
+    # 7. Correct secret -> Fast ACK 200 {"ok": True}
+    update_id = int(time.time() * 1000)
+    async def ok_receive():
+        return {"type": "http.request", "body": f'{{"update_id": {update_id}, "message": {{"text": "hi"}}}}'.encode(), "more_body": False}
+    req_ok = Request(
+        scope={"type": "http", "method": "POST", "path": f"/webhooks/telegram/{wh_id}", "headers": [(b"x-telegram-bot-api-secret-token", secret_token.encode())]},
+        receive=ok_receive,
+    )
+    res = await telegram_webhook(webhook_id=str(wh_id), request=req_ok, background_tasks=bg_tasks, session=mock_session)
     assert res == {"ok": True}
     assert len(bg_tasks.tasks) == 1
+
+    # 8. Duplicate update_id -> Fast ACK without scheduling new background task
+    bg_tasks_2 = BackgroundTasks()
+    res_dup = await telegram_webhook(webhook_id=str(wh_id), request=req_ok, background_tasks=bg_tasks_2, session=mock_session)
+    assert res_dup == {"ok": True}
+    assert len(bg_tasks_2.tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_telegram_disconnect_and_reconnect_lifecycle():
+    """Req 9, 10, 11: deleteWebhook called, old webhook invalidated, reconnect creates new UUID."""
+    from src.integrations.telegram.router import (
+        TelegramConnectRequest,
+        connect_telegram,
+        disconnect_telegram,
+        get_telegram_status,
+        telegram_webhook,
+    )
+    from fastapi import HTTPException
+
+    workspace = Workspace(id=uuid4(), name="Test WS", slug="test-ws", owner_id=uuid4())
+    bot_token = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+    enc = encrypt_token(bot_token)
+    wh_id_1 = str(uuid4())
+
+    integ = Integration(
+        id=uuid4(),
+        workspace_id=workspace.id,
+        provider="telegram",
+        status="connected",
+        config={
+            "username": "test_bot",
+            "first_name": "Test",
+            "webhook_id": wh_id_1,
+            "webhook_secret": "sec1",
+            "enc_token": enc["combined"].hex(),
+        },
+    )
+
+    mock_session = create_mock_session()
+    mock_session.execute.return_value = MagicMock(
+        scalar_one_or_none=MagicMock(return_value=integ),
+        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[integ]))),
+    )
+
+    # Status check
+    status_res = await get_telegram_status(session=mock_session, workspace=workspace)
+    assert status_res["status"] == "connected"
+    assert status_res["webhook_id"] == wh_id_1
+
+    # 9. Disconnect calls deleteWebhook
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_delete_post:
+        mock_delete_post.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"ok": True}))
+        disc_res = await disconnect_telegram(session=mock_session, workspace=workspace)
+        assert disc_res["status"] == "disconnected"
+        assert integ.status == "disconnected"
+        assert mock_delete_post.called
+        assert "deleteWebhook" in mock_delete_post.call_args[0][0]
+
+    # 10. After disconnect, old webhook_id returns 404
+    mock_session.execute.return_value = MagicMock(
+        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+    )
+    req_scope = Request(scope={"type": "http", "method": "POST", "path": f"/webhooks/telegram/{wh_id_1}", "headers": []})
+    with pytest.raises(HTTPException) as exc_disc:
+        await telegram_webhook(webhook_id=wh_id_1, request=req_scope, background_tasks=BackgroundTasks(), session=mock_session)
+    assert exc_disc.value.status_code == 404
+
+    # 11. Reconnect creates NEW webhook_id
+    mock_session.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=integ))
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"ok": True, "result": {"id": 123456, "username": "test_bot", "first_name": "Test"}}))
+        mock_post.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"ok": True, "result": True}))
+
+        req = TelegramConnectRequest(bot_token=bot_token, webhook_url="https://api.personal-os.com")
+        reconnect_res = await connect_telegram(req, session=mock_session, workspace=workspace)
+        assert reconnect_res["status"] == "connected"
+        wh_id_2 = reconnect_res["webhook_id"]
+        assert wh_id_2 != wh_id_1  # Brand new unique UUID
+
+
+@pytest.mark.asyncio
+async def test_telegram_set_webhook_failure_falls_back_to_polling():
+    """Req 12: setWebhook error gracefully falls back to mode='polling' and webhook_registered=False."""
+    from src.integrations.telegram.router import TelegramConnectRequest, connect_telegram
+
+    workspace = Workspace(id=uuid4(), name="Test WS", slug="test-ws", owner_id=uuid4())
+    mock_session = create_mock_session()
+    mock_session.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+
+    bot_token = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get, \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_get.return_value = MagicMock(status_code=200, json=MagicMock(return_value={"ok": True, "result": {"id": 123456, "username": "test_bot", "first_name": "Test"}}))
+        # setWebhook returns error
+        mock_post.return_value = MagicMock(status_code=400, json=MagicMock(return_value={"ok": False, "description": "Bad Request: HTTPS required"}))
+
+        req = TelegramConnectRequest(bot_token=bot_token, webhook_url="https://api.personal-os.com")
+        res = await connect_telegram(req, session=mock_session, workspace=workspace)
+
+        assert res["status"] == "connected"
+        assert res["mode"] == "polling"
+        assert res["webhook_registered"] is False
 
 
 # =====================================================================
@@ -310,7 +492,7 @@ async def test_ai_parse_telegram_intents():
 @pytest.mark.asyncio
 async def test_handle_telegram_update_creates_task():
     workspace_id = uuid4()
-    mock_session = AsyncMock()
+    mock_session = create_mock_session()
 
     integ = Integration(
         id=uuid4(),
@@ -342,7 +524,7 @@ async def test_handle_telegram_update_creates_task():
 @pytest.mark.asyncio
 async def test_handle_telegram_update_prompts_expense_confirmation():
     workspace_id = uuid4()
-    mock_session = AsyncMock()
+    mock_session = create_mock_session()
 
     integ = Integration(
         id=uuid4(),
@@ -372,3 +554,5 @@ async def test_handle_telegram_update_prompts_expense_confirmation():
         assert "Расход 450.0 руб." in sent_text
         assert markup is not None
         assert "inline_keyboard" in markup
+
+

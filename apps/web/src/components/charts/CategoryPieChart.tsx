@@ -100,17 +100,12 @@ export function CategoryPieChart({
                     key={slice.label}
                     d={slice.pathD}
                     fill={slice.color}
-                    tabIndex={0}
-                    role="button"
-                    aria-label={`${slice.label}: ${formatMinorUnits(slice.value, currency)} (${formatPercent(slice.value, totalAmountMinor, 1)})`}
                     style={{
                       transform: isHovered ? `translate(${ox}px, ${oy}px)` : undefined,
                       transition: 'transform 150ms ease, opacity 150ms ease',
                     }}
                     onMouseEnter={() => setHoveredCategory(slice.label)}
                     onMouseLeave={() => setHoveredCategory(null)}
-                    onFocus={() => setHoveredCategory(slice.label)}
-                    onBlur={() => setHoveredCategory(null)}
                     className={cn(
                       'cursor-pointer outline-none stroke-surface stroke-[1.5]',
                       hoveredCategory && !isHovered ? 'opacity-40' : 'opacity-100'

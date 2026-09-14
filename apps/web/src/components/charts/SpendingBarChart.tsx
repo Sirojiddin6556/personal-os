@@ -183,13 +183,9 @@ export function SpendingBarChart({
               return (
                 <g
                   key={item.date || index}
-                  tabIndex={0}
-                  role="button"
                   aria-label={`${formatChartDate(item.date, 'month-day')}: ${formatMinorUnits(item.amount_minor, item.currency || currency)}, ${item.count ?? 1} операций`}
                   onMouseEnter={() => setHoveredIndex(index)}
                   onMouseLeave={() => setHoveredIndex(null)}
-                  onFocus={() => setHoveredIndex(index)}
-                  onBlur={() => setHoveredIndex(null)}
                   className="cursor-pointer outline-none group"
                 >
                   {/* Hover background column highlight */}

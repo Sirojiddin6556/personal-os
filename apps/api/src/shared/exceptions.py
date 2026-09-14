@@ -48,8 +48,31 @@ class NotFoundError(DomainError):
         )
 
 
+class BadRequestError(DomainError):
+    """Bad Request error for malformed headers, wildcards, or invalid syntax (RFC 9110 400)."""
+
+    def __init__(
+        self,
+        detail: str = "The request was malformed or contains invalid parameters.",
+        instance: Optional[str] = None,
+        code: str = "BAD_REQUEST",
+        extensions: Optional[Dict[str, Any]] = None,
+    ):
+        ext = {"code": code}
+        if extensions:
+            ext.update(extensions)
+        super().__init__(
+            title="Bad Request",
+            detail=detail,
+            status=400,
+            type_="https://api.personal-os.local/errors/bad-request",
+            instance=instance,
+            extensions=ext,
+        )
+
+
 class ConflictError(DomainError):
-    """Conflict occurred, such as optimistic lock failure or unique constraint violation."""
+    """Conflict occurred, such as invalid state transition or unique constraint violation (RFC 9110 409)."""
 
     def __init__(
         self,
@@ -64,12 +87,59 @@ class ConflictError(DomainError):
             status=409,
             type_="https://api.personal-os.local/errors/conflict",
             instance=instance,
-            extensions=extensions,
+            extensions=extensions or {"code": "RESOURCE_CONFLICT"},
         )
 
 
-class OptimisticLockError(ConflictError):
-    """ETag / version mismatch detected during update."""
+class PreconditionRequiredError(DomainError):
+    """Precondition header is required (RFC 6585 428)."""
+
+    def __init__(
+        self,
+        detail: str = "The 'If-Match' precondition header is required to perform this update.",
+        instance: Optional[str] = None,
+        header: str = "If-Match",
+    ):
+        super().__init__(
+            title="Precondition Required",
+            detail=detail,
+            status=428,
+            type_="https://api.personal-os.local/errors/precondition-required",
+            instance=instance,
+            extensions={"code": "PRECONDITION_REQUIRED", "required_header": header},
+        )
+
+
+class PreconditionFailedError(DomainError):
+    """Precondition header check failed or resource version is stale (RFC 9110 412)."""
+
+    def __init__(
+        self,
+        detail: str = "The precondition header check failed. The resource version is outdated.",
+        resource: Optional[str] = None,
+        expected_version: Optional[Any] = None,
+        actual_version: Optional[Any] = None,
+        instance: Optional[str] = None,
+    ):
+        ext: Dict[str, Any] = {"code": "STALE_VERSION"}
+        if resource:
+            ext["resource"] = resource
+        if expected_version is not None:
+            ext["provided_version"] = expected_version
+        if actual_version is not None:
+            ext["current_version"] = actual_version
+        super().__init__(
+            title="Precondition Failed",
+            detail=detail,
+            status=412,
+            type_="https://api.personal-os.local/errors/precondition-failed",
+            instance=instance,
+            extensions=ext,
+        )
+
+
+class OptimisticLockError(PreconditionFailedError):
+    """ETag / version mismatch detected during update (RFC 9110 412)."""
 
     def __init__(
         self,
@@ -79,17 +149,14 @@ class OptimisticLockError(ConflictError):
         instance: Optional[str] = None,
     ):
         super().__init__(
-            title="Optimistic Lock Failure",
             detail=(
                 f"Resource '{resource}' has been modified by another transaction. "
                 f"Provided version {expected_version} does not match current version {actual_version}."
             ),
+            resource=resource,
+            expected_version=expected_version,
+            actual_version=actual_version,
             instance=instance,
-            extensions={
-                "resource": resource,
-                "expected_version": expected_version,
-                "actual_version": actual_version,
-            },
         )
 
 
@@ -146,21 +213,6 @@ class ValidationDomainError(DomainError):
         )
 
 
-class PreconditionFailedError(DomainError):
-    """Precondition header failed (e.g. missing or malformed If-Match)."""
-
-    def __init__(
-        self,
-        detail: str = "Precondition header check failed.",
-        instance: Optional[str] = None,
-    ):
-        super().__init__(
-            title="Precondition Failed",
-            detail=detail,
-            status=412,
-            type_="https://api.personal-os.local/errors/precondition-failed",
-            instance=instance,
-        )
 
 
 class RateLimitExceededError(DomainError):

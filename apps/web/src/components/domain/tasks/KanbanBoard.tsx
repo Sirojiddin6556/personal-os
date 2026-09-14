@@ -32,7 +32,6 @@ export const KANBAN_COLUMNS: { id: TaskStatus; title: string; dotColor: string }
   { id: TaskStatus.SCHEDULED, title: 'Запланировано', dotColor: '#8b5cf6' },
   { id: TaskStatus.IN_PROGRESS, title: 'В работе', dotColor: '#f59e0b' },
   { id: TaskStatus.WAITING, title: 'Ожидание', dotColor: '#ec4899' },
-  { id: TaskStatus.DONE, title: 'Завершено', dotColor: '#10b981' },
 ];
 
 export function KanbanBoard({
@@ -109,6 +108,7 @@ export function KanbanBoard({
             onCompleteTask={onCompleteTask}
             onEditTask={onEditTask}
             onDeleteTask={onDeleteTask}
+            onStatusChange={onMoveTask}
           />
         ))}
       </div>

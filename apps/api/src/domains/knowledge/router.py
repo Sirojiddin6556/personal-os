@@ -62,6 +62,16 @@ async def update_note(
     return NoteResponse.model_validate(note)
 
 
+@router.delete("/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_note(
+    note_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> None:
+    await knowledge_service.delete_note(session, workspace.id, note_id)
+
+
+
 @router.get("/search", response_model=List[NoteSearchResult])
 async def search_notes(
     q: str = Query(..., min_length=1, description="Search query string"),

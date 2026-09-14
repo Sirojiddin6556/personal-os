@@ -116,22 +116,6 @@ export default function AnalyticsPage() {
       }
     }
 
-    // Baseline sample distribution for fresh/demo environments
-    const hasAny = Array.from(dateMap.values()).some((v) => v.completed > 0 || v.created > 0);
-    if (!hasAny) {
-      const sampleCompleted = [3, 4, 2, 5, 4, 6, 7, 3, 5, 8, 4, 3, 6, 5, 4, 6, 7, 5, 8, 6, 5, 7, 9, 6, 5, 7, 8, 6, 7, 9];
-      const sampleCreated = [2, 3, 4, 3, 5, 4, 5, 2, 4, 6, 3, 4, 5, 3, 5, 4, 6, 4, 5, 5, 4, 6, 7, 5, 4, 6, 5, 4, 5, 7];
-
-      let idx = 0;
-      for (const key of Array.from(dateMap.keys())) {
-        dateMap.set(key, {
-          completed: sampleCompleted[idx % sampleCompleted.length],
-          created: sampleCreated[idx % sampleCreated.length],
-        });
-        idx++;
-      }
-    }
-
     for (const [date, val] of dateMap.entries()) {
       result.push({
         date,
@@ -143,10 +127,9 @@ export default function AnalyticsPage() {
     return result;
   }, [tasks, period]);
 
-  // Compute 52-week Activity Heatmap data
+  // Compute 52-week Activity Heatmap data from real events
   const heatmapData: ActivityDay[] = useMemo(() => {
     const map = new Map<string, number>();
-    const today = new Date();
 
     // Map tasks activities
     for (const t of tasks) {
@@ -159,47 +142,28 @@ export default function AnalyticsPage() {
       }
     }
 
-    // Seed historical contributions over 52 weeks for rich visualization
-    const days365 = 52 * 7;
-    for (let i = 0; i < days365; i++) {
-      const d = new Date(today);
-      d.setDate(today.getDate() - i);
-      const key = d.toISOString().split('T')[0];
-
-      if (!map.has(key)) {
-        // Deterministic pseudo-random pattern based on day of week and seed
-        const dayOfWeek = d.getDay();
-        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-        const seedVal = (d.getFullYear() * 1000 + d.getMonth() * 50 + d.getDate()) % 11;
-
-        let count = 0;
-        if (isWeekend) {
-          count = seedVal > 6 ? (seedVal % 3) : 0;
-        } else {
-          count = seedVal > 2 ? (seedVal % 7) + 1 : 0;
-        }
-
-        if (count > 0) {
-          map.set(key, count);
-        }
+    // Map habits logs
+    for (const h of habits) {
+      if (h.last_logged_date) {
+        map.set(h.last_logged_date, (map.get(h.last_logged_date) || 0) + 1);
       }
     }
 
     return Array.from(map.entries()).map(([date, count]) => ({ date, count }));
-  }, [tasks]);
+  }, [tasks, habits]);
 
-  // Aggregate Stats
+  // Aggregate Stats from real domain entities
   const stats = useMemo(() => {
-    const totalDone = tasks.filter((t) => t.status === 'done').length || 87;
-    const totalTasks = tasks.length || 104;
-    const completionRate = totalTasks > 0 ? Math.round((totalDone / totalTasks) * 100) : 84;
+    const totalDone = tasks.filter((t) => t.status === 'done').length;
+    const totalTasks = tasks.length;
+    const completionRate = totalTasks > 0 ? Math.round((totalDone / totalTasks) * 100) : 0;
 
-    // Current continuous active day streak
-    const maxHabitStreak = Math.max(...habits.map((h) => h.current_streak_days), 14);
+    // Current continuous active day streak from habits
+    const maxHabitStreak = habits.length > 0 ? Math.max(...habits.map((h) => h.current_streak_days)) : 0;
 
     // Average completed per day (over active period)
     const totalInPeriod = velocityData.reduce((acc, d) => acc + d.completed, 0);
-    const avgPerDay = (totalInPeriod / (velocityData.length || 1)).toFixed(1);
+    const avgPerDay = velocityData.length > 0 ? (totalInPeriod / velocityData.length).toFixed(1) : '0.0';
 
     return {
       streak: maxHabitStreak,

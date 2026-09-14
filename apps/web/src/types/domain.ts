@@ -14,25 +14,23 @@
 export enum TaskStatus {
   INBOX = 'inbox',
   TODO = 'todo',
-  BACKLOG = 'backlog',
   SCHEDULED = 'scheduled',
   IN_PROGRESS = 'in_progress',
   WAITING = 'waiting',
-  BLOCKED = 'blocked',
   DONE = 'done',
-  CANCELED = 'canceled',
+  CANCELLED = 'cancelled',
+  ARCHIVED = 'archived',
 }
 
 export type TaskStatusType =
   | 'inbox'
   | 'todo'
-  | 'backlog'
   | 'scheduled'
   | 'in_progress'
   | 'waiting'
-  | 'blocked'
   | 'done'
-  | 'canceled';
+  | 'cancelled'
+  | 'archived';
 
 /**
  * Task priority tiers aligned with Eisenhower Matrix principles.

@@ -14,6 +14,7 @@ from src.domains.finance.schemas import (
     BudgetResponse,
     CategoryCreate,
     CategoryResponse,
+    ReconcileAccountRequest,
     TransactionCreate,
     TransactionResponse,
     TransactionUpdate,
@@ -44,6 +45,16 @@ async def list_accounts(
     return [AccountResponse.model_validate(a) for a in accounts]
 
 
+@router.get("/accounts/{account_id}", response_model=AccountResponse)
+async def get_account(
+    account_id: UUID,
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> AccountResponse:
+    acc = await finance_service.get_account(session, workspace.id, account_id)
+    return AccountResponse.model_validate(acc)
+
+
 @router.delete("/accounts/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_account(
     account_id: UUID,
@@ -62,6 +73,23 @@ async def update_account(
 ) -> AccountResponse:
     acc = await finance_service.update_account(session, workspace.id, account_id, body)
     return AccountResponse.model_validate(acc)
+
+
+@router.post("/accounts/{account_id}/reconcile", response_model=TransactionResponse)
+async def reconcile_account(
+    account_id: UUID,
+    body: ReconcileAccountRequest,
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> TransactionResponse:
+    tx = await finance_service.reconcile_account(
+        session=session,
+        workspace_id=workspace.id,
+        account_id=account_id,
+        actual_balance_minor=body.actual_balance_minor,
+        reason=body.reason,
+    )
+    return TransactionResponse.model_validate(tx)
 
 
 @router.post("/categories", response_model=CategoryResponse, status_code=status.HTTP_201_CREATED)

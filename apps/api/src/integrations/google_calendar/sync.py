@@ -106,6 +106,60 @@ async def get_credentials(session: AsyncSession, workspace_id: UUID) -> Optional
     return res.scalar_one_or_none()
 
 
+async def get_valid_access_token(session: AsyncSession, credentials: OAuthCredential) -> str:
+    """Retrieve decrypted access token, automatically refreshing from Google if expired."""
+    from datetime import timedelta
+    from src.config import settings
+    from src.integrations.crypto import crypto_service, encrypt_token
+
+    now = datetime.now(timezone.utc)
+    is_expired = not credentials.token_expires_at or (credentials.token_expires_at <= now + timedelta(minutes=2))
+
+    if is_expired and credentials.encrypted_refresh_token:
+        try:
+            refresh_token_str = crypto_service.decrypt_token(credentials.encrypted_refresh_token)
+            stmt = select(Integration).where(Integration.id == credentials.integration_id)
+            res = await session.execute(stmt)
+            integ = res.scalar_one_or_none()
+            client_id = (integ.config.get("client_id") if integ else None) or settings.google_client_id
+            client_secret = ""
+            if integ and integ.config.get("enc_secret"):
+                enc_secret = bytes.fromhex(integ.config["enc_secret"])
+                client_secret = crypto_service.decrypt_token(enc_secret)
+            elif settings.google_client_secret:
+                client_secret = settings.google_client_secret
+
+            if client_id and client_secret and refresh_token_str:
+                async with httpx.AsyncClient(timeout=15.0) as client:
+                    r = await client.post(
+                        "https://oauth2.googleapis.com/token",
+                        data={
+                            "client_id": client_id,
+                            "client_secret": client_secret,
+                            "refresh_token": refresh_token_str,
+                            "grant_type": "refresh_token",
+                        },
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        new_access = data["access_token"]
+                        expires_in = data.get("expires_in", 3600)
+                        enc_access = encrypt_token(new_access)
+                        credentials.encrypted_access_token = enc_access["combined"]
+                        credentials.iv_access = enc_access["iv"]
+                        credentials.tag_access = enc_access["tag"]
+                        credentials.token_expires_at = now + timedelta(seconds=expires_in)
+                        await session.flush()
+                        logger.info("Successfully refreshed Google OAuth access token for integration %s", credentials.integration_id)
+                        return new_access
+                    else:
+                        logger.warning("Token refresh failed (HTTP %s): %s", r.status_code, r.text)
+        except Exception as ex:
+            logger.warning("Failed to refresh Google OAuth token: %s", ex)
+
+    return decrypt_token(credentials.encrypted_access_token)
+
+
 async def get_sync_token(session: AsyncSession, workspace_id: UUID) -> Optional[str]:
     """Retrieve saved opaque delta sync token."""
     stmt = (
@@ -354,13 +408,24 @@ async def full_sync(
         logger.warning("No Google credentials available for workspace %s full sync", workspace_id)
         return
 
-    access_token = decrypt_token(credentials.encrypted_access_token)
+    access_token = await get_valid_access_token(session, credentials)
     page_token: Optional[str] = None
     last_resp: Dict[str, Any] = {}
     synced_count = 0
 
     while True:
-        resp = await gcal_list_events(access_token, page_token=page_token)
+        try:
+            resp = await gcal_list_events(access_token, page_token=page_token)
+        except Exception as ex:
+            logger.warning("Error fetching events from Google Calendar: %s", ex)
+            stmt_integ = select(Integration).where(Integration.id == credentials.integration_id)
+            res_i = await session.execute(stmt_integ)
+            integ_rec = res_i.scalar_one_or_none()
+            if integ_rec:
+                integ_rec.sync_error = str(ex)
+            await session.commit()
+            return
+
         last_resp = resp
         for event in resp.get("items", []):
             await upsert_event(session, workspace_id, event)
@@ -372,6 +437,12 @@ async def full_sync(
     # Save syncToken for subsequent incremental delta syncs
     if "nextSyncToken" in last_resp:
         await save_sync_token(session, workspace_id, last_resp["nextSyncToken"])
+
+    stmt_integ = select(Integration).where(Integration.id == credentials.integration_id)
+    res_i = await session.execute(stmt_integ)
+    integ_rec = res_i.scalar_one_or_none()
+    if integ_rec:
+        integ_rec.sync_error = None
 
     await publish_event(
         session=session,
@@ -391,7 +462,7 @@ async def incremental_sync(session: AsyncSession, workspace_id: UUID) -> None:
         logger.warning("No Google credentials available for workspace %s incremental sync", workspace_id)
         return
 
-    access_token = decrypt_token(credentials.encrypted_access_token)
+    access_token = await get_valid_access_token(session, credentials)
     sync_token = await get_sync_token(session, workspace_id)
 
     if not sync_token:

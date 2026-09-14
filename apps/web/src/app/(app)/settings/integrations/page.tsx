@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useGoogleSyncStatus } from '@/hooks/useCalendar';
 import {
   useConnectGitHub,
@@ -12,7 +12,7 @@ import { formatDateShort } from '@/lib/utils';
 import Link from 'next/link';
 
 export default function IntegrationsSettingsPage() {
-  const { status: googleStatus, lastSync, errorMessage: googleError, isSyncing, triggerSync } = useGoogleSyncStatus();
+  // GitHub Integration Hooks
   const { data: githubData, isLoading: isLoadingGithub } = useGitHubStatus();
   const connectGitHubMutation = useConnectGitHub();
   const disconnectGitHubMutation = useDisconnectGitHub();
@@ -21,11 +21,51 @@ export default function IntegrationsSettingsPage() {
   const [isConnectingGithub, setIsConnectingGithub] = useState(false);
   const [githubError, setGithubError] = useState<string | null>(null);
 
+  // Google Calendar Integration State
+  const { status: googleStatus, lastSync, errorMessage: googleError, isSyncing, triggerSync } = useGoogleSyncStatus();
+  const [googleClientId, setGoogleClientId] = useState('');
+  const [googleClientSecret, setGoogleClientSecret] = useState('');
+  const [isSavingGoogleKeys, setIsSavingGoogleKeys] = useState(false);
+  const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
+  const [isGoogleConfigured, setIsGoogleConfigured] = useState(false);
+  const [isDisconnectingGoogle, setIsDisconnectingGoogle] = useState(false);
+  const [copiedRedirect, setCopiedRedirect] = useState(false);
+  const redirectUri = 'http://localhost:8008/v1/integrations/google/callback';
+
+  // Telegram Bot Integration State
   const [telegramStatus, setTelegramStatus] = useState<'connected' | 'disconnected'>('disconnected');
+  const [telegramBotInfo, setTelegramBotInfo] = useState<{ username?: string; first_name?: string } | null>(null);
+  const [telegramBotToken, setTelegramBotToken] = useState('');
+  const [isConnectingTelegram, setIsConnectingTelegram] = useState(false);
+  const [telegramError, setTelegramError] = useState<string | null>(null);
   const [telegramCode, setTelegramCode] = useState<string | null>(null);
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
-  const [isDisconnectingGoogle, setIsDisconnectingGoogle] = useState(false);
 
+  // Load Google & Telegram config on mount
+  useEffect(() => {
+    apiRequest<{ configured: boolean; client_id?: string; status?: string }>('GET', '/integrations/google/config')
+      .then((cfg) => {
+        if (cfg?.configured) {
+          setIsGoogleConfigured(true);
+          if (cfg.client_id) setGoogleClientId(cfg.client_id);
+        }
+      })
+      .catch(() => {});
+
+    apiRequest<{ status: 'connected' | 'disconnected'; bot?: { username?: string; first_name?: string } }>(
+      'GET',
+      '/integrations/telegram/status'
+    )
+      .then((res) => {
+        if (res?.status === 'connected') {
+          setTelegramStatus('connected');
+          setTelegramBotInfo(res.bot || null);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // GitHub handlers
   const handleConnectGitHub = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!githubToken.trim()) return;
@@ -50,16 +90,46 @@ export default function IntegrationsSettingsPage() {
     }
   };
 
-  const handleConnectGoogle = async () => {
+  // Google Calendar handlers
+  const handleSaveAndConnectGoogle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!googleClientId.trim() || !googleClientSecret.trim()) {
+      setGoogleAuthError('Заполните Client ID и Client Secret.');
+      return;
+    }
+    setIsSavingGoogleKeys(true);
+    setGoogleAuthError(null);
+    try {
+      // 1. Save keys to backend integration config
+      await apiRequest('POST', '/integrations/google/configure', {
+        body: {
+          client_id: googleClientId.trim(),
+          client_secret: googleClientSecret.trim(),
+        },
+      });
+      setIsGoogleConfigured(true);
+
+      // 2. Fetch Google OAuth authorization URL
+      const res = await apiRequest<{ auth_url: string }>('GET', '/integrations/google/auth-url');
+      if (res?.auth_url) {
+        window.location.href = res.auth_url;
+      }
+    } catch (err: any) {
+      setGoogleAuthError(err?.message || 'Ошибка настройки Google Calendar');
+    } finally {
+      setIsSavingGoogleKeys(false);
+    }
+  };
+
+  const handleConnectExistingGoogle = async () => {
+    setGoogleAuthError(null);
     try {
       const res = await apiRequest<{ auth_url: string }>('GET', '/integrations/google/auth-url');
       if (res?.auth_url) {
         window.location.href = res.auth_url;
-      } else {
-        window.location.href = '/v1/integrations/google/authorize';
       }
-    } catch {
-      window.location.href = '/v1/integrations/google/authorize';
+    } catch (err: any) {
+      setGoogleAuthError(err?.message || 'Ошибка входа через Google');
     }
   };
 
@@ -76,18 +146,33 @@ export default function IntegrationsSettingsPage() {
     }
   };
 
-  const handleGenerateTelegramCode = async () => {
-    setIsGeneratingCode(true);
-    try {
-      // Generate OTP pairing code
-      const res = await apiRequest<{ pairing_code: string; deep_link?: string }>(
-        'POST',
-        '/integrations/telegram/pairing-code'
-      ).catch(() => ({ pairing_code: 'POS-' + Math.floor(100000 + Math.random() * 900000) }));
+  const copyRedirectUri = () => {
+    navigator.clipboard.writeText(redirectUri);
+    setCopiedRedirect(true);
+    setTimeout(() => setCopiedRedirect(false), 2000);
+  };
 
-      setTelegramCode(res.pairing_code);
+  // Telegram handlers
+  const handleConnectTelegramBot = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!telegramBotToken.trim()) return;
+    setIsConnectingTelegram(true);
+    setTelegramError(null);
+    try {
+      const res = await apiRequest<{ status: string; bot: { username?: string; first_name?: string } }>(
+        'POST',
+        '/integrations/telegram/connect',
+        { body: { bot_token: telegramBotToken.trim() } }
+      );
+      if (res?.status === 'connected') {
+        setTelegramStatus('connected');
+        setTelegramBotInfo(res.bot || null);
+        setTelegramBotToken('');
+      }
+    } catch (err: any) {
+      setTelegramError(err?.message || 'Ошибка подключения Telegram бота. Проверьте токен.');
     } finally {
-      setIsGeneratingCode(false);
+      setIsConnectingTelegram(false);
     }
   };
 
@@ -96,10 +181,24 @@ export default function IntegrationsSettingsPage() {
     try {
       await apiRequest('DELETE', '/integrations/telegram');
       setTelegramStatus('disconnected');
-      setTelegramCode(null);
+      setTelegramBotInfo(null);
     } catch (err) {
       setTelegramStatus('disconnected');
-      setTelegramCode(null);
+      setTelegramBotInfo(null);
+    }
+  };
+
+  const handleGenerateTelegramCode = async () => {
+    setIsGeneratingCode(true);
+    try {
+      const res = await apiRequest<{ pairing_code: string; deep_link?: string }>(
+        'POST',
+        '/integrations/telegram/pairing-code'
+      ).catch(() => ({ pairing_code: 'POS-' + Math.floor(100000 + Math.random() * 900000) }));
+
+      setTelegramCode(res.pairing_code);
+    } finally {
+      setIsGeneratingCode(false);
     }
   };
 
@@ -118,15 +217,15 @@ export default function IntegrationsSettingsPage() {
           <h1 className="text-2xl font-bold text-text-primary tracking-tight">
             Внешние интеграции
           </h1>
-          <p className="text-xs text-text-muted mt-1">
-            Управление внешними сервисами, синхронизацией календарей и Telegram-ботом
+          <p className="text-sm text-text-muted mt-1">
+            Подключение и прямое управление внешними сервисами через веб-интерфейс
           </p>
         </div>
       </div>
 
       {/* Integrations Grid */}
       <div className="grid grid-cols-1 gap-6">
-        {/* Card 0: GitHub Integration */}
+        {/* Card 1: GitHub Integration */}
         <div className="p-6 rounded-2xl bg-surface border border-border space-y-5 shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3.5">
@@ -178,61 +277,60 @@ export default function IntegrationsSettingsPage() {
             </div>
           </div>
 
-          {/* Connected User Details or Token Connection Form */}
           {githubData?.status === 'connected' && githubData.user ? (
-            <div className="p-4 rounded-xl bg-surface-muted border border-border flex items-center justify-between gap-4">
+            <div className="pt-4 border-t border-border flex items-center justify-between">
               <div className="flex items-center gap-3">
                 {githubData.user.avatar_url && (
                   <img
                     src={githubData.user.avatar_url}
                     alt={githubData.user.login}
-                    className="w-10 h-10 rounded-full border border-border"
+                    className="w-8 h-8 rounded-full border border-border"
                   />
                 )}
                 <div>
-                  <p className="text-sm font-bold text-text-primary">
-                    {githubData.user.name || githubData.user.login}
-                  </p>
-                  <p className="text-xs text-text-muted font-mono">
-                    @{githubData.user.login} · {githubData.user.public_repos ?? 0} репозиториев
-                  </p>
+                  <div className="text-xs font-semibold text-text-primary flex items-center gap-1.5">
+                    <span>{githubData.user.name || githubData.user.login}</span>
+                    <span className="text-text-muted font-normal">(@{githubData.user.login})</span>
+                  </div>
+                  <div className="text-[11px] text-text-muted">
+                    Репозиториев доступно: {githubData.user.public_repos ?? 0}
+                  </div>
                 </div>
               </div>
               <a
                 href={githubData.user.html_url || `https://github.com/${githubData.user.login}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs font-medium text-primary hover:underline"
+                className="text-xs text-primary hover:underline font-medium"
               >
-                Открыть профиль ↗
+                Профиль GitHub ↗
               </a>
             </div>
           ) : (
-            <form onSubmit={handleConnectGitHub} className="pt-2 space-y-3">
+            <form onSubmit={handleConnectGitHub} className="pt-4 border-t border-border space-y-3">
               <div className="space-y-1.5">
-                <label htmlFor="gh-token" className="block text-xs font-semibold text-text-primary">
-                  Personal Access Token (classic или fine-grained):
+                <label className="text-xs font-semibold text-text-primary">
+                  Personal Access Token (PAT)
                 </label>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <input
-                    id="gh-token"
                     type="password"
-                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                     value={githubToken}
                     onChange={(e) => setGithubToken(e.target.value)}
                     required
-                    className="flex-1 px-3 py-2 text-xs bg-surface-muted border border-border rounded-xl text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                    className="flex-1 px-3.5 py-2 text-xs bg-surface-muted border border-border rounded-xl text-text-primary focus:outline-none focus:ring-1 focus:ring-primary font-mono"
                   />
                   <button
                     type="submit"
                     disabled={isConnectingGithub || !githubToken.trim()}
-                    className="px-4 py-2 rounded-xl bg-primary hover:bg-primary-600 active:scale-95 text-xs font-semibold text-white transition-all shadow-xs disabled:opacity-50 shrink-0"
+                    className="px-4 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold hover:opacity-90 active:scale-95 transition-all shadow-xs disabled:opacity-50 shrink-0"
                   >
-                    {isConnectingGithub ? 'Подключение...' : 'Подключить'}
+                    {isConnectingGithub ? 'Проверка...' : 'Подключить GitHub'}
                   </button>
                 </div>
                 {githubError && (
-                  <p className="text-xs text-rose-600 dark:text-rose-400 font-medium">
+                  <p className="text-xs text-status-error font-medium mt-1">
                     ⚠️ {githubError}
                   </p>
                 )}
@@ -252,7 +350,7 @@ export default function IntegrationsSettingsPage() {
           )}
         </div>
 
-        {/* Card 1: Google Calendar */}
+        {/* Card 2: Google Calendar */}
         <div className="p-6 rounded-2xl bg-surface border border-border space-y-5 shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3.5">
@@ -311,16 +409,79 @@ export default function IntegrationsSettingsPage() {
                     Отключить
                   </button>
                 </>
-              ) : (
+              ) : isGoogleConfigured ? (
                 <button
-                  onClick={handleConnectGoogle}
-                  className="px-4 py-2 rounded-xl bg-primary hover:bg-primary-600 active:scale-95 text-xs font-semibold text-white transition-all shadow-xs"
+                  onClick={handleConnectExistingGoogle}
+                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-xs font-semibold text-white transition-all shadow-xs"
                 >
-                  Подключить Google
+                  Войти через Google ↗
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
+
+          {/* Web Configuration Form for Google OAuth */}
+          {googleStatus !== 'connected' && (
+            <form onSubmit={handleSaveAndConnectGoogle} className="pt-4 border-t border-border space-y-4">
+              <div className="p-3.5 rounded-xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/60 text-xs space-y-2">
+                <div className="font-semibold text-blue-900 dark:text-blue-200 flex items-center gap-1.5">
+                  <span>🔑 Прямая настройка ключей Google Cloud</span>
+                </div>
+                <p className="text-text-secondary leading-relaxed">
+                  Вставьте полученные в Google Cloud Console данные. Они сохраняются в зашифрованном виде (AES-256-GCM).
+                </p>
+                <div className="flex items-center justify-between gap-2 p-2 bg-surface rounded-lg border border-border">
+                  <div className="truncate font-mono text-[11px] text-text-muted">
+                    Redirect URI: <span className="text-text-primary font-semibold">{redirectUri}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={copyRedirectUri}
+                    className="px-2.5 py-1 text-[11px] font-semibold rounded bg-surface-muted border border-border hover:bg-border transition-colors shrink-0"
+                  >
+                    {copiedRedirect ? '✓ Скопировано' : 'Копировать'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-text-primary">Google Client ID</label>
+                  <input
+                    type="text"
+                    placeholder="xxxxxxxxxxxx-xxxxxxxxxxxxxxxx.apps.googleusercontent.com"
+                    value={googleClientId}
+                    onChange={(e) => setGoogleClientId(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 text-xs bg-surface-muted border border-border rounded-xl text-text-primary focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-text-primary">Google Client Secret</label>
+                  <input
+                    type="password"
+                    placeholder="GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxx"
+                    value={googleClientSecret}
+                    onChange={(e) => setGoogleClientSecret(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 text-xs bg-surface-muted border border-border rounded-xl text-text-primary focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                  />
+                </div>
+              </div>
+
+              {googleAuthError && (
+                <p className="text-xs text-status-error font-medium">⚠️ {googleAuthError}</p>
+              )}
+
+              <button
+                type="submit"
+                disabled={isSavingGoogleKeys || !googleClientId.trim() || !googleClientSecret.trim()}
+                className="w-full sm:w-auto px-5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-xs font-bold text-white transition-all shadow-xs disabled:opacity-50"
+              >
+                {isSavingGoogleKeys ? 'Сохранение...' : 'Сохранить ключи и войти через Google ↗'}
+              </button>
+            </form>
+          )}
 
           {/* Details & Status Bar */}
           <div className="pt-4 border-t border-border/60 flex flex-wrap items-center justify-between text-xs text-text-muted gap-2">
@@ -339,7 +500,7 @@ export default function IntegrationsSettingsPage() {
           </div>
         </div>
 
-        {/* Card 2: Telegram Bot */}
+        {/* Card 3: Telegram Bot */}
         <div className="p-6 rounded-2xl bg-surface border border-border space-y-5 shadow-xs">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3.5">
@@ -358,11 +519,11 @@ export default function IntegrationsSettingsPage() {
                         : 'bg-text-muted/15 text-text-muted'
                     }`}
                   >
-                    {telegramStatus === 'connected' ? 'Привязан' : 'Не привязан'}
+                    {telegramStatus === 'connected' ? 'Подключен' : 'Не подключен'}
                   </span>
                 </h3>
                 <p className="text-xs text-text-muted mt-0.5">
-                  Быстрый захват задач, голосовые заметки, утренний брифинг и PUSH-оповещения.
+                  Быстрый захват задач, учет расходов, голосовые заметки и PUSH-оповещения.
                 </p>
               </div>
             </div>
@@ -373,48 +534,96 @@ export default function IntegrationsSettingsPage() {
                   onClick={handleDisconnectTelegram}
                   className="px-3 py-1.5 rounded-xl border border-status-error/20 bg-status-error/5 hover:bg-status-error/10 text-xs font-semibold text-status-error transition-colors"
                 >
-                  Отвязать аккаунт
+                  Отключить
                 </button>
-              ) : (
-                <button
-                  onClick={handleGenerateTelegramCode}
-                  disabled={isGeneratingCode}
-                  className="px-4 py-2 rounded-xl bg-primary hover:bg-primary-600 active:scale-95 text-xs font-semibold text-white transition-all shadow-xs disabled:opacity-50"
-                >
-                  {isGeneratingCode ? 'Генерация...' : 'Привязать Telegram'}
-                </button>
-              )}
+              ) : null}
             </div>
           </div>
 
-          {/* Pairing Instructions & Deep Link */}
-          <div className="pt-4 border-t border-border/60 space-y-3 text-xs">
-            <h4 className="font-semibold text-text-primary">Инструкция по подключению:</h4>
-            <ol className="list-decimal list-inside space-y-1.5 text-text-secondary">
-              <li>Откройте бота в Telegram: <a href="https://t.me/personal_os_bot" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-semibold">@personal_os_bot ↗</a></li>
-              <li>Нажмите кнопку <strong>Start</strong> или отправьте команду <code className="px-1.5 py-0.5 rounded bg-surface-muted border border-border font-mono text-[11px]">/start</code></li>
-              <li>Для привязки аккаунта отправьте полученный одноразовый код или перейдите по персональной ссылке ниже:</li>
-            </ol>
-
-            {telegramCode && (
-              <div className="mt-3 p-4 rounded-xl bg-surface-muted border border-primary/20 space-y-2 animate-fade-in">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-text-muted">Ваш код привязки:</span>
-                  <span className="text-base font-mono font-bold text-primary tracking-widest">{telegramCode}</span>
+          {telegramStatus === 'connected' && telegramBotInfo ? (
+            <div className="pt-4 border-t border-border flex items-center justify-between">
+              <div className="text-xs">
+                <div className="font-semibold text-text-primary">
+                  {telegramBotInfo.first_name || 'Personal OS Bot'}
                 </div>
-                <div className="pt-2">
-                  <a
-                    href={`https://t.me/personal_os_bot?start=${telegramCode}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-600 text-white font-medium text-xs transition-colors"
-                  >
-                    <span>Открыть в Telegram с кодом ↗</span>
-                  </a>
+                <div className="text-text-muted">
+                  @{telegramBotInfo.username}
                 </div>
               </div>
-            )}
-          </div>
+              <a
+                href={`https://t.me/${telegramBotInfo.username}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold transition-colors"
+              >
+                Открыть чат с ботом ↗
+              </a>
+            </div>
+          ) : (
+            <div className="pt-4 border-t border-border space-y-4">
+              {/* Option A: Connect via Bot Token */}
+              <form onSubmit={handleConnectTelegramBot} className="space-y-3">
+                <label className="text-xs font-semibold text-text-primary">
+                  Токен бота (Telegram Bot Token)
+                </label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="password"
+                    placeholder="1234567890:ABCdefGhIJKlmNoPQRsTUVwxyZ"
+                    value={telegramBotToken}
+                    onChange={(e) => setTelegramBotToken(e.target.value)}
+                    required
+                    className="flex-1 px-3.5 py-2 text-xs bg-surface-muted border border-border rounded-xl text-text-primary focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isConnectingTelegram || !telegramBotToken.trim()}
+                    className="px-4 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold transition-all shadow-xs disabled:opacity-50 shrink-0"
+                  >
+                    {isConnectingTelegram ? 'Проверка...' : 'Подключить бота'}
+                  </button>
+                </div>
+                {telegramError && (
+                  <p className="text-xs text-status-error font-medium">⚠️ {telegramError}</p>
+                )}
+                <p className="text-[11px] text-text-muted">
+                  💡 Получить токен можно бесплатно за 1 минуту у официального бота{' '}
+                  <a
+                    href="https://t.me/BotFather"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary hover:underline font-semibold"
+                  >
+                    @BotFather ↗
+                  </a>
+                </p>
+              </form>
+
+              {/* Option B: Pairing Code for user account */}
+              <div className="pt-3 border-t border-border/60 flex items-center justify-between">
+                <span className="text-xs text-text-muted">Или привяжите свой аккаунт по коду:</span>
+                <button
+                  onClick={handleGenerateTelegramCode}
+                  disabled={isGeneratingCode}
+                  className="text-xs font-semibold text-primary hover:underline"
+                >
+                  {isGeneratingCode ? 'Генерация...' : 'Получить код привязки →'}
+                </button>
+              </div>
+
+              {telegramCode && (
+                <div className="p-3.5 rounded-xl bg-surface-muted border border-primary/20 space-y-2 animate-fade-in">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-text-muted">Ваш код:</span>
+                    <span className="text-base font-mono font-bold text-primary tracking-widest">{telegramCode}</span>
+                  </div>
+                  <div className="text-[11px] text-text-muted">
+                    Отправьте команду <code className="px-1 py-0.5 rounded bg-surface border font-mono">/start {telegramCode}</code> вашему боту.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

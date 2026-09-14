@@ -16,7 +16,7 @@ class TimeWindow(BaseModel):
 
 class BudgetSummary(BaseModel):
     total_balance_minor: int
-    currency: str = "RUB"
+    currency: str = "UZS"
     active_accounts_count: int
 
 

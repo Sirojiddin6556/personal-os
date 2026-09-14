@@ -1,7 +1,9 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
+import Link from 'next/link';
 import { useDashboardToday } from '@/hooks/useDashboardToday';
+import { useTasks } from '@/hooks/useTasks';
 import { useUIStore } from '@/stores/ui-store';
 import { MorningBriefCard } from '../notifications/MorningBriefCard';
 import { TaskCard } from '../tasks/TaskCard';
@@ -20,10 +22,12 @@ export function TodayDashboard() {
     stats,
   } = useDashboardToday();
 
+  const { completeTask } = useTasks();
   const { openQuickAdd, openTaskDetail } = useUIStore();
+  const [briefSuccessMsg, setBriefSuccessMsg] = useState<string | null>(null);
 
   const handleTaskComplete = (id: string) => {
-    console.log('Toggle complete task:', id);
+    completeTask(id);
   };
 
   const handleTaskEdit = (id: string) => {
@@ -32,6 +36,24 @@ export function TodayDashboard() {
 
   return (
     <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-6">
+      <h1 className="sr-only">Сегодняшний дашборд</h1>
+
+      {briefSuccessMsg && (
+        <div
+          role="status"
+          className="p-3 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 rounded-xl text-xs font-semibold flex items-center justify-between animate-fadeIn"
+        >
+          <span>✓ {briefSuccessMsg}</span>
+          <button
+            type="button"
+            onClick={() => setBriefSuccessMsg(null)}
+            className="text-emerald-600 hover:text-emerald-800 text-sm font-bold"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       {/* 1. Overdue Alert Banner (if any overdue tasks) */}
       {overdueTasks.length > 0 && (
         <div
@@ -51,12 +73,12 @@ export function TodayDashboard() {
               </p>
             </div>
           </div>
-          <a
+          <Link
             href="/tasks?status=todo"
             className="px-3 py-1.5 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/60 rounded-lg transition-colors shrink-0"
           >
             Разобрать →
-          </a>
+          </Link>
         </div>
       )}
 
@@ -65,11 +87,11 @@ export function TodayDashboard() {
         <MorningBriefCard
           brief={brief}
           onAccept={() => {
-            alert('План на день принят! Тайм-блоки добавлены в календарь.');
+            setBriefSuccessMsg('План на день принят! Тайм-блоки добавлены в календарь.');
             dismissBrief();
           }}
           onPartialAccept={(ids) => {
-            alert(`Принято ${ids.length} блока из плана.`);
+            setBriefSuccessMsg(`Принято ${ids.length} блока из плана.`);
             dismissBrief();
           }}
           onDismiss={dismissBrief}
@@ -86,19 +108,19 @@ export function TodayDashboard() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                <h3 id="top-tasks-heading" className="text-base font-bold text-text-primary">
+                <h2 id="top-tasks-heading" className="text-base font-bold text-text-primary">
                   Топ-3 задачи дня
-                </h3>
+                </h2>
                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-text-secondary">
                   {stats.completedTasks}/{stats.totalTasks} выполнено
                 </span>
               </div>
-              <a
+              <Link
                 href="/tasks"
                 className="text-xs font-semibold text-primary hover:underline"
               >
                 Все задачи →
-              </a>
+              </Link>
             </div>
 
             {/* Task list */}
@@ -135,26 +157,26 @@ export function TodayDashboard() {
           <div>
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
-                <h3 id="agenda-heading" className="text-base font-bold text-text-primary">
+                <h2 id="agenda-heading" className="text-base font-bold text-text-primary">
                   Расписание и встречи
-                </h3>
+                </h2>
                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300">
                   {agenda.length} события
                 </span>
               </div>
               <div className="flex items-center gap-3">
-                <a
+                <Link
                   href="/planner"
                   className="text-xs font-bold text-primary hover:underline flex items-center gap-1"
                 >
                   <span>📓 Ежедневник</span>
-                </a>
-                <a
+                </Link>
+                <Link
                   href="/calendar"
                   className="text-xs font-semibold text-text-muted hover:text-text-primary"
                 >
                   Календарь →
-                </a>
+                </Link>
               </div>
             </div>
 
@@ -220,12 +242,12 @@ export function TodayDashboard() {
               className="lg:col-span-2 bg-surface border border-border rounded-2xl p-5 shadow-xs"
             >
               <div className="flex items-center justify-between mb-3">
-                <h3 id="budget-summary-heading" className="text-base font-bold text-text-primary">
+                <h2 id="budget-summary-heading" className="text-base font-bold text-text-primary">
                   Бюджет на текущий месяц
-                </h3>
-                <a href="/finance" className="text-xs font-semibold text-primary hover:underline">
+                </h2>
+                <Link href="/finance" className="text-xs font-semibold text-primary hover:underline">
                   Финансы →
-                </a>
+                </Link>
               </div>
 
               <div className="flex items-center justify-between text-xs mb-1.5">
@@ -241,6 +263,7 @@ export function TodayDashboard() {
               <div className="w-full h-3 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                 <div
                   role="progressbar"
+                  aria-label="Прогресс расходов по бюджету"
                   aria-valuenow={percentage}
                   aria-valuemin={0}
                   aria-valuemax={100}
@@ -274,9 +297,9 @@ export function TodayDashboard() {
         >
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h3 id="habits-summary-heading" className="text-base font-bold text-text-primary">
+              <h2 id="habits-summary-heading" className="text-base font-bold text-text-primary">
                 Привычки и продуктивность
-              </h3>
+              </h2>
               <span className="text-xs font-semibold text-purple-600 dark:text-purple-400">
                 🔥 Стрик: 5 дней
               </span>

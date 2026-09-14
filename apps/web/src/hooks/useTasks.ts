@@ -510,6 +510,12 @@ export function useTasks(filters?: {
   const completeTaskMutation = useCompleteTask();
   const deleteTaskMutation = useDeleteTask();
 
+  React.useEffect(() => {
+    if (serverTasks) {
+      setTasks(serverTasks);
+    }
+  }, [serverTasks]);
+
   const filteredTasks = React.useMemo(() => {
     const list = tasks.length > 0 ? tasks : serverTasks;
     return list.filter((task) => {

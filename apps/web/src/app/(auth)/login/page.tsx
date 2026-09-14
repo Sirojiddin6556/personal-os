@@ -89,8 +89,15 @@ export default function LoginPage() {
         throw new Error('Не удалось получить ссылку для входа через Google.');
       }
     } catch (err) {
-      // Fallback for local development or direct OAuth redirect
-      window.location.href = '/v1/integrations/google/authorize';
+      // Do not redirect to /v1 on the Next.js origin: OAuth is served by the
+      // API (usually localhost:8008), while this page runs on localhost:3000.
+      // The old fallback caused a misleading frontend 404 and hid the real
+      // API/configuration error from the user.
+      if (err instanceof Error) {
+        setGeneralError(err.message);
+      } else {
+        setGeneralError('Не удалось запустить вход через Google. Проверьте доступность API.');
+      }
     } finally {
       setIsOAuthLoading(false);
     }

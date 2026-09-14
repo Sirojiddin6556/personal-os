@@ -13,28 +13,46 @@ from src.config import settings
 from src.db.session import async_session_factory, get_session as get_tenant_db_session
 from src.domains.identity.models import Membership, User, Workspace
 from src.shared.exceptions import (
+    BadRequestError,
     ForbiddenError,
     PreconditionFailedError,
+    PreconditionRequiredError,
     UnauthorizedError,
 )
 
 
 def parse_etag(if_match: Optional[str]) -> int:
-    """Parse integer version number from HTTP If-Match header value."""
+    """Parse integer version number from HTTP If-Match header value.
+
+    RFC 9110 / RFC 6585 Rules:
+    - Missing If-Match -> 428 Precondition Required
+    - Wildcard '*', weak ETags (W/...), lists, or non-numeric values -> 400 Bad Request (INVALID_ETAG)
+    - Valid numeric string (e.g. '"1"') -> integer version
+    """
     if not if_match:
-        raise PreconditionFailedError("Missing required 'If-Match' header for optimistic concurrency.")
+        raise PreconditionRequiredError("Missing required 'If-Match' header for optimistic concurrency.")
 
     clean_etag = if_match.strip()
-    # Strip weak prefix W/
-    if clean_etag.startswith("W/"):
-        clean_etag = clean_etag[2:]
-    # Strip surrounding quotes
-    clean_etag = clean_etag.strip('"')
 
-    try:
-        return int(clean_etag)
-    except ValueError:
-        raise PreconditionFailedError(f"Malformed If-Match header: '{if_match}'. Expected integer version.")
+    # Reject wildcard, weak tags, and comma-separated multiple ETags
+    if clean_etag == "*" or clean_etag.startswith("W/") or clean_etag.startswith("w/") or "," in clean_etag:
+        raise BadRequestError(
+            detail=f"Invalid If-Match header: '{if_match}'. Weak ETags, wildcards, and multi-values are not supported for optimistic concurrency.",
+            code="INVALID_ETAG",
+            extensions={"header": "If-Match", "received_value": if_match},
+        )
+
+    # Strip surrounding quotes
+    unquoted = clean_etag.strip('"')
+
+    if not unquoted.isdigit():
+        raise BadRequestError(
+            detail=f"Malformed If-Match header: '{if_match}'. Expected quoted integer version (e.g. '\"1\"').",
+            code="INVALID_ETAG",
+            extensions={"header": "If-Match", "received_value": if_match},
+        )
+
+    return int(unquoted)
 
 
 async def get_public_session() -> AsyncGenerator[AsyncSession, None]:

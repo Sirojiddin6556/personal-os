@@ -166,7 +166,7 @@ async def ai_parse_telegram_message(text: str, workspace_id: UUID) -> TelegramIn
         category = expense_match.group(2).strip() or "прочее"
         return TelegramIntent(
             "CREATE_EXPENSE",
-            {"amount": amount, "category": category, "currency": "RUB"},
+            {"amount": amount, "category": category, "currency": "UZS"},
         )
 
     # Direct expense pattern: "500 руб такси", "350р обед"
@@ -180,7 +180,7 @@ async def ai_parse_telegram_message(text: str, workspace_id: UUID) -> TelegramIn
         category = direct_expense.group(2).strip() or "прочее"
         return TelegramIntent(
             "CREATE_EXPENSE",
-            {"amount": amount, "category": category, "currency": "RUB"},
+            {"amount": amount, "category": category, "currency": "UZS"},
         )
 
     # Task pattern: "Задача: Купить молоко", "Сделать презентацию", "todo: Review PR"
@@ -203,12 +203,22 @@ async def ai_parse_telegram_message(text: str, workspace_id: UUID) -> TelegramIn
         title = reminder_match.group(1).strip()
         return TelegramIntent("CREATE_REMINDER", {"title": title, "body": title})
 
+    # Greeting / Help pattern
+    greetings = {
+        "привет", "салам", "здравствуйте", "здравствуй", "добрый день",
+        "доброе утро", "добрый вечер", "хай", "hello", "hi", "hey",
+        "/help", "помощь", "start", "/start"
+    }
+    if lower_text in greetings or lower_text.startswith(("/start", "/help")):
+        return TelegramIntent("GREETING", {})
+
     return TelegramIntent("UNKNOWN", {})
 
 
 async def handle_telegram_update(
     update: Dict[str, Any],
     session: Optional[AsyncSession] = None,
+    workspace_id: Optional[UUID] = None,
 ) -> None:
     """Process incoming Telegram update and execute matched domain action."""
     # 1. Handle Inline Keyboard Callback Queries (e.g. Confirm Expense)
@@ -234,7 +244,8 @@ async def handle_telegram_update(
     if not chat_id or not text:
         return
 
-    workspace_id = await get_workspace_by_telegram_chat(chat_id, session=session)
+    if not workspace_id:
+        workspace_id = await get_workspace_by_telegram_chat(chat_id, session=session)
 
     # 3. Handle /start onboarding command
     if text.startswith("/start"):
@@ -294,6 +305,25 @@ async def handle_telegram_update(
         intent = await ai_parse_telegram_message(text, workspace_id)
 
         match intent.type:
+            case "GREETING":
+                welcome_text = (
+                    "👋 Привет! Я ваш персональный ассистент Personal OS.\n\n"
+                    "Я помогу быстро фиксировать задачи и финансы:\n\n"
+                    "📋 Создание задач:\n"
+                    "• Задача: Купить билеты\n"
+                    "• Сделать: Подготовить презентацию\n"
+                    "• todo: Deploy release\n\n"
+                    "💳 Учёт расходов:\n"
+                    "• Расход: 500 руб кафе\n"
+                    "• Потратил 1500 руб супермаркет\n"
+                    "• 350р такси\n\n"
+                    "⏰ Напоминания:\n"
+                    "• Напоминание: в 18:00 созвон\n"
+                    "• Напомни выпить витамины\n\n"
+                    "Просто напишите мне задачу или сумму расхода!"
+                )
+                await send_message(chat_id, welcome_text)
+
             case "CREATE_TASK":
                 task_data = TaskCreate(**intent.data) if isinstance(intent.data, dict) else intent.data
                 task = await task_service.create(s, workspace_id, task_data)
@@ -318,13 +348,28 @@ async def handle_telegram_update(
                 )
 
         # Log to inbox_items
+        entity_type: Optional[str] = None
+        entity_id: Optional[UUID] = None
+        item_status = "pending"
+
+        if intent.type == "CREATE_TASK" and 'task' in locals() and task:
+            entity_type = "task"
+            entity_id = task.id
+            item_status = "processed"
+        elif intent.type == "CREATE_REMINDER" and 'reminder' in locals() and reminder:
+            entity_type = "reminder"
+            entity_id = reminder.id
+            item_status = "processed"
+
         inbox_item = InboxItem(
             id=uuid4(),
             workspace_id=workspace_id,
             source="telegram",
             raw_content=text,
             parsed_data={"intent": intent.type, "data": intent.data, "chat_id": str(chat_id)},
-            status="processed" if intent.type != "UNKNOWN" else "pending",
+            status=item_status,
+            processed_entity_type=entity_type,
+            processed_entity_id=entity_id,
         )
         s.add(inbox_item)
         await publish_event(
