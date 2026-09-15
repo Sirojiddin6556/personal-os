@@ -44,6 +44,7 @@ export interface ParsedQuickAdd {
   intent: 'task' | 'event' | 'expense' | 'note';
   title: string;
   due_date?: string;
+  iso_date?: string;
   priority?: TaskPriority;
   project?: string;
   amount?: number;

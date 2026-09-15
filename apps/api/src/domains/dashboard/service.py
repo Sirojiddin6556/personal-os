@@ -11,12 +11,15 @@ from src.domains.calendar.models import Event
 from src.domains.calendar.schemas import EventResponse
 from src.domains.dashboard.schemas import (
     BudgetSummary,
+    DashboardStats,
     DashboardSummaryResponse,
     DashboardToday,
+    HabitSummary,
     TimeWindow,
 )
-from src.domains.finance.models import Account
+from src.domains.finance.models import Account, Transaction
 from src.domains.notifications.models import Notification
+from src.domains.planner.models import Habit, HabitLog
 from src.domains.tasks.models import Task
 from src.domains.tasks.schemas import TaskResponse
 
@@ -126,11 +129,73 @@ def calculate_free_windows(
     return free_windows
 
 
+async def get_overdue_tasks(
+    session: AsyncSession,
+    workspace_id: UUID,
+    limit: int = 10,
+) -> List[TaskResponse]:
+    """Retrieve overdue incomplete tasks ordered by due date ascending."""
+    now = datetime.now(timezone.utc)
+    stmt = (
+        select(Task)
+        .where(
+            Task.workspace_id == workspace_id,
+            Task.is_deleted.is_(False),
+            Task.status.notin_(["done", "cancelled", "archived"]),
+            Task.due_at < now,
+        )
+        .order_by(Task.due_at.asc())
+        .limit(limit)
+    )
+    res = await session.execute(stmt)
+    return [TaskResponse.model_validate(t) for t in res.scalars().all()]
+
+
+async def get_habits_today(
+    session: AsyncSession,
+    workspace_id: UUID,
+    today_date: datetime.date,
+) -> List[HabitSummary]:
+    """Retrieve active habits and whether they were logged today."""
+    stmt = select(Habit).where(
+        Habit.workspace_id == workspace_id,
+        Habit.is_archived.is_(False),
+    ).order_by(Habit.created_at.asc())
+    res = await session.execute(stmt)
+    habits = res.scalars().all()
+    if not habits:
+        return []
+
+    habit_ids = [h.id for h in habits]
+    log_stmt = select(HabitLog.habit_id).where(
+        HabitLog.workspace_id == workspace_id,
+        HabitLog.habit_id.in_(habit_ids),
+        HabitLog.logged_date == today_date,
+    )
+    logged_res = await session.execute(log_stmt)
+    logged_habit_ids = set(logged_res.scalars().all())
+
+    return [
+        HabitSummary(
+            id=str(h.id),
+            title=h.title,
+            target_count=h.target_count,
+            current_streak=h.current_streak,
+            best_streak=h.best_streak,
+            completed_today=(h.id in logged_habit_ids),
+        )
+        for h in habits
+    ]
+
+
 async def get_budget_summary(
     session: AsyncSession,
     workspace_id: UUID,
+    today_start: datetime,
+    today_end: datetime,
 ) -> BudgetSummary:
-    """Calculate aggregated balance and active account count across the workspace."""
+    """Calculate aggregated balance, today expenses and active account count."""
+    # 1. Accounts balance
     stmt = (
         select(func.sum(Account.balance_minor), func.count(Account.id))
         .where(
@@ -142,8 +207,41 @@ async def get_budget_summary(
     row = res.one()
     total_balance = row[0] or 0
     active_count = row[1] or 0
+
+    # 2. Today's expenses
+    expense_stmt = (
+        select(func.sum(Transaction.amount_minor))
+        .where(
+            Transaction.workspace_id == workspace_id,
+            Transaction.status != "reversed",
+            Transaction.type == "expense",
+            Transaction.occurred_at >= today_start,
+            Transaction.occurred_at <= today_end,
+        )
+    )
+    expense_res = await session.execute(expense_stmt)
+    today_spent = expense_res.scalar_one() or 0
+
+    # 3. Monthly expenses (current month)
+    month_start = today_start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    monthly_stmt = (
+        select(func.sum(Transaction.amount_minor))
+        .where(
+            Transaction.workspace_id == workspace_id,
+            Transaction.status != "reversed",
+            Transaction.type == "expense",
+            Transaction.occurred_at >= month_start,
+            Transaction.occurred_at <= today_end,
+        )
+    )
+    monthly_res = await session.execute(monthly_stmt)
+    monthly_spent = monthly_res.scalar_one() or 0
+
     return BudgetSummary(
         total_balance_minor=int(total_balance),
+        today_spent_minor=int(today_spent),
+        monthly_spent_minor=int(monthly_spent),
+        monthly_limit_minor=1500000000,
         currency="UZS",
         active_accounts_count=active_count,
     )
@@ -154,15 +252,51 @@ async def get_today(
     workspace_id: UUID,
     user_tz: str = "UTC",
 ) -> DashboardToday:
-    """Consolidated today view: events, top tasks, overdue count, free slots, budget."""
+    """Consolidated today view: events, top tasks, overdue count, free slots, budget, habits, stats."""
     today_start, today_end = get_day_bounds(user_tz)
     events = await get_events_today(session, workspace_id, today_start, today_end)
+    top_tasks = await get_top_tasks(session, workspace_id, limit=3)
+    overdue_tasks = await get_overdue_tasks(session, workspace_id, limit=10)
+    overdue_count = len(overdue_tasks)
+    free_windows = calculate_free_windows(events, today_start, today_end)
+    budget = await get_budget_summary(session, workspace_id, today_start, today_end)
+    habits = await get_habits_today(session, workspace_id, today_start.date())
+
+    # Calculate total active and completed today
+    total_tasks_stmt = select(func.count(Task.id)).where(
+        Task.workspace_id == workspace_id,
+        Task.is_deleted.is_(False),
+    )
+    total_tasks = (await session.execute(total_tasks_stmt)).scalar_one() or 0
+
+    completed_today_stmt = select(func.count(Task.id)).where(
+        Task.workspace_id == workspace_id,
+        Task.is_deleted.is_(False),
+        Task.status == "done",
+        Task.completed_at >= today_start,
+    )
+    completed_today = (await session.execute(completed_today_stmt)).scalar_one() or 0
+
+    free_minutes = sum(w.duration_minutes for w in free_windows)
+    free_hours = round(free_minutes / 60.0, 1)
+
+    stats = DashboardStats(
+        total_tasks=total_tasks,
+        completed_tasks=completed_today,
+        overdue_count=overdue_count,
+        events_count=len(events),
+        free_hours=free_hours,
+    )
+
     return DashboardToday(
         events=events,
-        top_tasks=await get_top_tasks(session, workspace_id, limit=3),
-        overdue_count=await count_overdue(session, workspace_id),
-        free_windows=calculate_free_windows(events, today_start, today_end),
-        budget_summary=await get_budget_summary(session, workspace_id),
+        top_tasks=top_tasks,
+        overdue_tasks=overdue_tasks,
+        overdue_count=overdue_count,
+        free_windows=free_windows,
+        budget_summary=budget,
+        habits=habits,
+        stats=stats,
     )
 
 

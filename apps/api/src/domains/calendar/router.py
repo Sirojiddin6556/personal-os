@@ -48,6 +48,7 @@ async def list_events(
 
 
 @router.post("/time-blocks", response_model=TimeBlockResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/timeblocks", response_model=TimeBlockResponse, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 async def create_time_block(
     body: TimeBlockCreate,
     session: AsyncSession = Depends(get_db_session),
@@ -58,6 +59,7 @@ async def create_time_block(
 
 
 @router.get("/time-blocks", response_model=List[TimeBlockResponse])
+@router.get("/timeblocks", response_model=List[TimeBlockResponse], include_in_schema=False)
 async def list_time_blocks(
     start_date: Optional[datetime] = Query(None, alias="from", description="Range start ISO datetime"),
     end_date: Optional[datetime] = Query(None, alias="to", description="Range end ISO datetime"),

@@ -1,8 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { ParsedQuickAdd } from '@/types/ai';
-import { TaskPriority } from '@/types/domain';
+import { TaskPriority, Priority, TaskStatus, TransactionType } from '@/types/domain';
+import { useCreateTask } from '@/hooks/useTasks';
+import { useCreateEvent } from '@/hooks/useCalendar';
+import { useCreateTransaction, useAccounts, useCategories } from '@/hooks/useFinance';
+import { useCreateNote } from '@/hooks/useNotes';
 
 export function useParseInput(rawInput: string): {
   parsed: ParsedQuickAdd | null;
@@ -24,21 +28,23 @@ export function useParseInput(rawInput: string): {
 
       // 1. Detect Intent
       let intent: 'task' | 'event' | 'expense' | 'note' = 'task';
-      const expenseMatch = text.match(/(\d+[\s\d]*)\s*(?:₽|руб|rub|\$|€)/i) || text.match(/(купил|потратил|оплатил|расход)/i);
-      const eventMatch = text.match(/(митинг|встреча|созвон|вебинар|конференция|в\s+\d{1,2}:\d{2})/i);
-      const noteMatch = text.match(/^(заметка|идея|мысль|заметка:)/i);
+      const isExpense = /(\d+[\s\d]*)\s*(?:₽|руб|сум|uzs|rub|\$|€)/i.test(text) ||
+        /\b(купил|потратил|оплатил|расход|чек|обед|такси|кофе|покупка|ужин|билет)\b/i.test(text);
+      const isEvent = /\b(митинг|встреча|созвон|вебинар|конференция|зум|zoom|звонок|стоматолог|тренировка|встретиться|собрание)\b/i.test(text) ||
+        /\bв\s+\d{1,2}:\d{2}\b/i.test(text);
+      const isNote = /^(заметка|идея|мысль|записать|memo|note):?/i.test(text);
 
-      if (expenseMatch) {
-        intent = 'expense';
-      } else if (eventMatch) {
-        intent = 'event';
-      } else if (noteMatch) {
+      if (isNote) {
         intent = 'note';
+      } else if (isExpense) {
+        intent = 'expense';
+      } else if (isEvent) {
+        intent = 'event';
       }
 
       // 2. Detect Priority
       let priority: TaskPriority = 'medium';
-      if (/!(критично|critical|p0|срочно)/i.test(text)) {
+      if (/!(критично|critical|p0|срочно|urgent)/i.test(text)) {
         priority = 'critical';
       } else if (/!(high|важно|p1|высокий)/i.test(text)) {
         priority = 'high';
@@ -53,55 +59,102 @@ export function useParseInput(rawInput: string): {
       const project = projectMatch ? projectMatch[1] : undefined;
 
       // 4. Detect Date / Due
-      let dueDate: string | undefined;
+      const now = new Date();
+      let targetDate = new Date();
+      let hasDate = false;
+
       if (/сегодня/i.test(text)) {
-        dueDate = 'Сегодня, 18:00';
+        hasDate = true;
       } else if (/завтра/i.test(text)) {
-        dueDate = 'Завтра, 12:00';
-      } else if (/пятниц/i.test(text)) {
-        dueDate = 'Пятница, 18:00';
-      } else if (/понедельник/i.test(text)) {
-        dueDate = 'Понедельник, 10:00';
+        targetDate.setDate(targetDate.getDate() + 1);
+        hasDate = true;
+      } else if (/послезавтра/i.test(text)) {
+        targetDate.setDate(targetDate.getDate() + 2);
+        hasDate = true;
+      } else if (/в\s+понедельник/i.test(text)) {
+        const day = 1;
+        const diff = (day + 7 - targetDate.getDay()) % 7 || 7;
+        targetDate.setDate(targetDate.getDate() + diff);
+        hasDate = true;
+      } else if (/в\s+пятниц/i.test(text)) {
+        const day = 5;
+        const diff = (day + 7 - targetDate.getDay()) % 7 || 7;
+        targetDate.setDate(targetDate.getDate() + diff);
+        hasDate = true;
       }
 
       // 5. Detect Time
-      const timeMatch = text.match(/(\d{1,2}:\d{2})/);
-      const time = timeMatch ? timeMatch[1] : undefined;
-      if (time && dueDate) {
-        dueDate = `${dueDate.split(',')[0]}, ${time}`;
+      const timeMatch = text.match(/(\d{1,2}):(\d{2})/);
+      let timeStr: string | undefined;
+      if (timeMatch) {
+        const hours = parseInt(timeMatch[1], 10);
+        const mins = parseInt(timeMatch[2], 10);
+        targetDate.setHours(hours, mins, 0, 0);
+        timeStr = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+        hasDate = true;
+      } else if (hasDate) {
+        targetDate.setHours(18, 0, 0, 0);
+        timeStr = '18:00';
       }
+
+      const isoDate = hasDate ? targetDate.toISOString() : undefined;
+      const displayDueDate = hasDate
+        ? `${targetDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}, ${timeStr || '18:00'}`
+        : undefined;
 
       // 6. Detect Expense details
       let amount: number | undefined;
-      let currency = 'RUB';
-      const numberExtract = text.match(/(\d+(?:\s\d+)*)/);
-      if (intent === 'expense' && numberExtract) {
-        amount = parseInt(numberExtract[1].replace(/\s+/g, ''), 10);
+      let currency = 'UZS';
+      if (/₽|руб|rub/i.test(text)) {
+        currency = 'RUB';
+      } else if (/\$|usd/i.test(text)) {
+        currency = 'USD';
+      } else if (/€|eur/i.test(text)) {
+        currency = 'EUR';
       }
 
-      // Clean title from special syntax
-      let cleanTitle = text
+      const numberExtract = text.match(/(\d[\d\s]*\d|\d+)/);
+      if (intent === 'expense' && numberExtract) {
+        const rawNum = numberExtract[1].replace(/\s+/g, '');
+        amount = parseInt(rawNum, 10);
+      }
+
+      // Detect Account / Category
+      let category = 'Повседневные';
+      if (/такси|яндекс|uber|поездка/i.test(text)) category = 'Транспорт';
+      else if (/кофе|обед|ужин|кафе|ресторан|продукты|еда/i.test(text)) category = 'Питание';
+      else if (/сервер|подписка|софт|хостинг|api/i.test(text)) category = 'Сервисы и IT';
+      else if (/книга|курс|обучение/i.test(text)) category = 'Образование';
+
+      // Clean Title
+      const cleanTitle = text
+        .replace(/^(заметка|идея|мысль|записать|memo|note):?\s*/i, '')
         .replace(/#([\w\u0400-\u04FF_-]+)/g, '')
-        .replace(/!(критично|critical|p0|срочно|high|важно|p1|высокий|med|medium|средний|p2|low|низкий|p3)/gi, '')
+        .replace(/!(критично|critical|p0|срочно|urgent|high|важно|p1|высокий|med|medium|средний|p2|low|низкий|p3)/gi, '')
+        .replace(/\b(сегодня|завтра|послезавтра)\b/gi, '')
+        .replace(/\bв\s+\d{1,2}:\d{2}\b/gi, '')
+        .replace(/\b\d{1,2}:\d{2}\b/gi, '')
+        .replace(/(\d+[\s\d]*)\s*(?:₽|руб|сум|uzs|rub|\$|€)/gi, '')
         .replace(/\s+/g, ' ')
         .trim();
 
       setParsed({
         intent,
         title: cleanTitle || text,
-        due_date: dueDate,
+        due_date: displayDueDate,
+        iso_date: isoDate,
         priority,
         project,
         amount,
         currency,
-        account: intent === 'expense' ? 'Основная карта' : undefined,
-        category: intent === 'expense' ? 'Повседневные расходы' : undefined,
-        time,
+        account: 'Основной счет',
+        category,
+        time: timeStr,
         confidence: 0.95,
       });
 
       setIsParsing(false);
-    }, 300); // 300ms debounce
+    }, 250);
 
     return () => clearTimeout(timer);
   }, [rawInput]);
@@ -109,51 +162,112 @@ export function useParseInput(rawInput: string): {
   return { parsed, isParsing };
 }
 
-export function useCreateTask() {
-  const [isPending, setIsPending] = useState(false);
-  return {
-    isPending,
-    mutateAsync: async (taskData: {
-      title: string;
-      priority?: TaskPriority;
-      due_at?: string;
-      project?: string;
-    }) => {
-      setIsPending(true);
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      setIsPending(false);
-      return { id: `task-${Date.now()}`, ...taskData };
-    },
-  };
-}
+export function useQuickAddSubmit() {
+  const createTaskMutation = useCreateTask();
+  const createEventMutation = useCreateEvent();
+  const createTxMutation = useCreateTransaction();
+  const createNoteMutation = useCreateNote();
+  const { accounts } = useAccounts();
+  const { categories } = useCategories();
 
-export function useCreateEvent() {
-  const [isPending, setIsPending] = useState(false);
-  return {
-    isPending,
-    mutateAsync: async (eventData: { title: string; start: string; end?: string }) => {
-      setIsPending(true);
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      setIsPending(false);
-      return { id: `event-${Date.now()}`, ...eventData };
-    },
-  };
-}
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-export function useCreateTransaction() {
-  const [isPending, setIsPending] = useState(false);
+  const submitQuickAdd = async ({
+    intent,
+    title,
+    priority = 'medium',
+    dueDate,
+    isoDate,
+    project,
+    amount,
+    currency = 'UZS',
+    categoryId,
+    accountId,
+    noteContent,
+  }: {
+    intent: 'task' | 'event' | 'expense' | 'note';
+    title: string;
+    priority?: TaskPriority;
+    dueDate?: string;
+    isoDate?: string;
+    project?: string;
+    amount?: number;
+    currency?: string;
+    categoryId?: string;
+    accountId?: string;
+    noteContent?: string;
+  }) => {
+    setIsSubmitting(true);
+    try {
+      if (intent === 'task') {
+        const priorityEnum =
+          priority === 'critical' || priority === 'urgent'
+            ? Priority.P1
+            : priority === 'high'
+            ? Priority.P2
+            : priority === 'low'
+            ? Priority.P4
+            : Priority.P3;
+
+        await createTaskMutation.mutateAsync({
+          title,
+          priority: priorityEnum,
+          due_date: isoDate || (dueDate ? new Date(dueDate).toISOString() : null),
+          status: TaskStatus.TODO,
+          tags: project ? [project] : [],
+        });
+      } else if (intent === 'event') {
+        const startIso = isoDate || new Date().toISOString();
+        const startObj = new Date(startIso);
+        const endObj = new Date(startObj.getTime() + 60 * 60 * 1000); // 1 hour duration default
+
+        await createEventMutation.mutateAsync({
+          title,
+          start_time: startObj.toISOString(),
+          end_time: endObj.toISOString(),
+          is_all_day: false,
+        });
+      } else if (intent === 'expense') {
+        const targetAccount =
+          accounts.find((a) => a.id === accountId) ||
+          accounts[0];
+
+        const targetCategory =
+          categories.find((c) => c.id === categoryId) ||
+          categories.find((c) => c.name.toLowerCase().includes('повседнев')) ||
+          categories[0];
+
+        const amountMinor = Math.round((amount || 0) * 100);
+
+        if (targetAccount) {
+          await createTxMutation.mutateAsync({
+            account_id: targetAccount.id,
+            category_id: targetCategory?.id || null,
+            amount_minor: amountMinor > 0 ? amountMinor : 100000,
+            currency: currency || targetAccount.currency || 'UZS',
+            type: TransactionType.EXPENSE,
+            description: title || 'Быстрый расход',
+            transaction_date: isoDate || new Date().toISOString(),
+          });
+        }
+      } else if (intent === 'note') {
+        await createNoteMutation.mutateAsync({
+          title: title || 'Быстрая заметка',
+          content_markdown: noteContent || title,
+        });
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return {
-    isPending,
-    mutateAsync: async (txData: {
-      amount: number;
-      category: string;
-      account_name: string;
-      currency?: string;
-    }) => {
-      setIsPending(true);
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      setIsPending(false);
-      return { id: `tx-${Date.now()}`, ...txData };
-    },
+    submitQuickAdd,
+    isSubmitting:
+      isSubmitting ||
+      createTaskMutation.isPending ||
+      createEventMutation.isPending ||
+      createTxMutation.isPending ||
+      createNoteMutation.isPending,
   };
 }

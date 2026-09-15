@@ -1,15 +1,20 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { useUIStore } from '@/stores/ui-store';
-import { useParseInput, useCreateTask, useCreateEvent, useCreateTransaction } from '@/hooks/useQuickAdd';
+import { useParseInput, useQuickAddSubmit } from '@/hooks/useQuickAdd';
+import { useTasks } from '@/hooks/useTasks';
+import { useNotes } from '@/hooks/useNotes';
+import { useProjects } from '@/hooks/useGitHub';
 import { TaskPriority } from '@/types/domain';
 import { cn } from '@/lib/utils';
 
 export function QuickAddModal() {
-  const { isQuickAddOpen, closeQuickAdd, quickAddInitialType } = useUIStore();
+  const router = useRouter();
+  const { isQuickAddOpen, closeQuickAdd, quickAddInitialType, openTaskDetail } = useUIStore();
   const [inputText, setInputText] = useState('');
-  const [selectedIntent, setSelectedIntent] = useState<'task' | 'event' | 'expense' | 'note'>('task');
+  const [selectedIntent, setSelectedIntent] = useState<'task' | 'event' | 'expense' | 'note' | 'search'>('task');
   const [showStructuredForm, setShowStructuredForm] = useState(false);
 
   // Fallback structured form fields
@@ -22,15 +27,31 @@ export function QuickAddModal() {
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const { parsed, isParsing } = useParseInput(inputText);
-  const createTaskMutation = useCreateTask();
-  const createEventMutation = useCreateEvent();
-  const createTxMutation = useCreateTransaction();
+  const { submitQuickAdd, isSubmitting } = useQuickAddSubmit();
+
+  // Search sources
+  const { tasks = [] } = useTasks();
+  const { notes = [] } = useNotes();
+  const { data: dbProjects = [] } = useProjects();
+
+  const searchResults = useMemo(() => {
+    const q = inputText.trim().toLowerCase();
+    if (!q || q.length < 2) return { tasks: [], notes: [], projects: [] };
+
+    const matchedTasks = tasks.filter((t) => t.title.toLowerCase().includes(q)).slice(0, 4);
+    const matchedNotes = notes.filter((n) => n.title.toLowerCase().includes(q) || (n.content_markdown || '').toLowerCase().includes(q)).slice(0, 4);
+    const matchedProjects = dbProjects.filter((p: any) => (p.name || p.title || '').toLowerCase().includes(q)).slice(0, 3);
+
+    return { tasks: matchedTasks, notes: matchedNotes, projects: matchedProjects };
+  }, [inputText, tasks, notes, dbProjects]);
+
+  const totalResultsCount = searchResults.tasks.length + searchResults.notes.length + searchResults.projects.length;
 
   // Reset when opened
   useEffect(() => {
     if (isQuickAddOpen) {
       setInputText('');
-      setSelectedIntent(quickAddInitialType || 'task');
+      setSelectedIntent((quickAddInitialType as any) || 'task');
       setShowStructuredForm(false);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
@@ -38,40 +59,33 @@ export function QuickAddModal() {
 
   // Sync detected intent from NLP
   useEffect(() => {
-    if (parsed && !showStructuredForm) {
+    if (parsed && !showStructuredForm && selectedIntent !== 'search') {
       setSelectedIntent(parsed.intent);
     }
-  }, [parsed, showStructuredForm]);
+  }, [parsed, showStructuredForm, selectedIntent]);
 
   if (!isQuickAddOpen) return null;
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
+    if (selectedIntent === 'search') return;
+
     const title = showStructuredForm ? manualTitle : (parsed?.title || inputText);
-    if (!title.trim() && !manualAmount) return;
+    if (!title.trim() && !manualAmount && selectedIntent !== 'expense') return;
 
     try {
-      if (selectedIntent === 'task') {
-        await createTaskMutation.mutateAsync({
-          title,
-          priority: showStructuredForm ? manualPriority : (parsed?.priority || 'medium'),
-          due_at: showStructuredForm ? manualDate : parsed?.due_date,
-          project: showStructuredForm ? manualProject : parsed?.project,
-        });
-      } else if (selectedIntent === 'event') {
-        await createEventMutation.mutateAsync({
-          title,
-          start: showStructuredForm ? manualDate : (parsed?.due_date || new Date().toISOString()),
-        });
-      } else if (selectedIntent === 'expense') {
-        const amt = showStructuredForm ? parseFloat(manualAmount) : (parsed?.amount || 0);
-        await createTxMutation.mutateAsync({
-          amount: amt,
-          category: parsed?.category || 'Разное',
-          account_name: parsed?.account || 'Основная карта',
-        });
-      }
+      await submitQuickAdd({
+        intent: selectedIntent as any,
+        title: title.trim() || (selectedIntent === 'expense' ? 'Расход' : 'Новый элемент'),
+        priority: showStructuredForm ? manualPriority : (parsed?.priority || 'medium'),
+        dueDate: showStructuredForm ? manualDate : parsed?.due_date,
+        isoDate: parsed?.iso_date,
+        project: showStructuredForm ? manualProject : parsed?.project,
+        amount: showStructuredForm ? parseFloat(manualAmount) : parsed?.amount,
+        currency: parsed?.currency || 'UZS',
+        noteContent: title,
+      });
       closeQuickAdd();
     } catch (err) {
       console.error('Failed to quick add:', err);
@@ -88,9 +102,6 @@ export function QuickAddModal() {
     }
   };
 
-  const isSubmitting =
-    createTaskMutation.isPending || createEventMutation.isPending || createTxMutation.isPending;
-
   return (
     <div
       role="dialog"
@@ -105,8 +116,8 @@ export function QuickAddModal() {
         {/* Top Bar: Auto-detected entity intent chips */}
         <div className="flex items-center justify-between px-4 pt-3.5 pb-2.5 border-b border-border-subtle bg-slate-50/50 dark:bg-slate-900/50">
           <div className="flex items-center gap-1.5" role="tablist">
-            {(['task', 'event', 'expense', 'note'] as const).map((intent) => {
-              const labels = { task: 'Задача', event: 'Событие', expense: 'Расход', note: 'Заметка' };
+            {(['task', 'event', 'expense', 'note', 'search'] as const).map((intent) => {
+              const labels = { task: 'Задача', event: 'Событие', expense: 'Расход', note: 'Заметка', search: '🔍 Поиск' };
               const isActive = selectedIntent === intent;
               return (
                 <button
@@ -131,7 +142,102 @@ export function QuickAddModal() {
         </div>
 
         {/* Body Content */}
-        {!showStructuredForm ? (
+        {selectedIntent === 'search' ? (
+          /* Universal Global Search View */
+          <div className="p-4 sm:p-5 space-y-4">
+            <h2 id="quick-add-title" className="sr-only">
+              Глобальный поиск
+            </h2>
+            <div className="relative">
+              <textarea
+                ref={inputRef}
+                rows={1}
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                placeholder="Поиск по задачам, заметкам, проектам..."
+                className="w-full text-base bg-transparent border-b border-border pb-2 resize-none text-text-primary placeholder:text-text-muted focus:outline-none"
+              />
+            </div>
+
+            {/* Live Search Results */}
+            <div className="max-h-60 overflow-y-auto space-y-3 pt-1">
+              {inputText.trim().length >= 2 && totalResultsCount === 0 && (
+                <p className="text-center py-4 text-xs text-text-muted">Ничего не найдено по запросу «{inputText}»</p>
+              )}
+
+              {/* Tasks */}
+              {searchResults.tasks.length > 0 && (
+                <div>
+                  <span className="text-[11px] font-bold text-text-muted uppercase tracking-wider block mb-1.5">Задачи</span>
+                  <div className="space-y-1.5">
+                    {searchResults.tasks.map((task) => (
+                      <button
+                        key={task.id}
+                        type="button"
+                        onClick={() => {
+                          openTaskDetail(task.id);
+                          closeQuickAdd();
+                        }}
+                        className="w-full text-left p-2 rounded-xl bg-surface-muted/60 hover:bg-surface-muted flex items-center justify-between text-xs transition-colors"
+                      >
+                        <span className="font-medium text-text-primary truncate">📋 {task.title}</span>
+                        <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-surface border border-border text-text-secondary shrink-0">
+                          {task.status}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Notes */}
+              {searchResults.notes.length > 0 && (
+                <div>
+                  <span className="text-[11px] font-bold text-text-muted uppercase tracking-wider block mb-1.5">Заметки</span>
+                  <div className="space-y-1.5">
+                    {searchResults.notes.map((note) => (
+                      <button
+                        key={note.id}
+                        type="button"
+                        onClick={() => {
+                          router.push(`/notes/${note.id}`);
+                          closeQuickAdd();
+                        }}
+                        className="w-full text-left p-2 rounded-xl bg-surface-muted/60 hover:bg-surface-muted flex items-center justify-between text-xs transition-colors"
+                      >
+                        <span className="font-medium text-text-primary truncate">📝 {note.title}</span>
+                        <span className="text-[10px] text-text-muted shrink-0">Заметка</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Projects */}
+              {searchResults.projects.length > 0 && (
+                <div>
+                  <span className="text-[11px] font-bold text-text-muted uppercase tracking-wider block mb-1.5">Проекты</span>
+                  <div className="space-y-1.5">
+                    {searchResults.projects.map((proj: any) => (
+                      <button
+                        key={proj.id}
+                        type="button"
+                        onClick={() => {
+                          router.push(`/projects`);
+                          closeQuickAdd();
+                        }}
+                        className="w-full text-left p-2 rounded-xl bg-surface-muted/60 hover:bg-surface-muted flex items-center justify-between text-xs transition-colors"
+                      >
+                        <span className="font-medium text-text-primary truncate">📁 {proj.name || proj.title}</span>
+                        <span className="text-[10px] text-text-muted shrink-0">Проект</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : !showStructuredForm ? (
           /* Fast NLP Free-text Mode (Quick Add <= 3 actions) */
           <div className="p-4 sm:p-5">
             <h2 id="quick-add-title" className="sr-only">
@@ -264,13 +370,15 @@ export function QuickAddModal() {
         {/* Footer with Submit CTA */}
         <div className="flex items-center justify-between px-4 py-3 bg-slate-50 dark:bg-slate-900 border-t border-border">
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowStructuredForm(!showStructuredForm)}
-              className="text-xs text-primary hover:underline font-medium"
-            >
-              {showStructuredForm ? '← Быстрый ввод' : 'Подробные поля'}
-            </button>
+            {selectedIntent !== 'search' && (
+              <button
+                type="button"
+                onClick={() => setShowStructuredForm(!showStructuredForm)}
+                className="text-xs text-primary hover:underline font-medium"
+              >
+                {showStructuredForm ? '← Быстрый ввод' : 'Подробные поля'}
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -281,17 +389,21 @@ export function QuickAddModal() {
             >
               Отмена
             </button>
-            <button
-              type="button"
-              disabled={isSubmitting}
-              onClick={() => handleSubmit()}
-              className="px-4 py-1.5 text-xs font-bold text-white bg-primary hover:bg-primary-600 active:scale-95 disabled:opacity-50 rounded-md shadow-sm transition-all"
-            >
-              {isSubmitting ? 'Сохранение...' : 'Создать [Enter]'}
-            </button>
+            {selectedIntent !== 'search' && (
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => handleSubmit()}
+                className="px-4 py-1.5 text-xs font-bold text-white bg-primary hover:bg-primary-600 active:scale-95 disabled:opacity-50 rounded-md shadow-sm transition-all"
+              >
+                {isSubmitting ? 'Сохранение...' : 'Создать [Enter]'}
+              </button>
+            )}
           </div>
         </div>
       </div>
     </div>
   );
 }
+
+export default QuickAddModal;

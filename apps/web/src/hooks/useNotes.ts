@@ -45,6 +45,47 @@ export function useUpdateNote(id: string) {
 }
 
 /**
+ * Fetch list of notes.
+ */
+export function useNotes(isPinned?: boolean) {
+  const query = useQuery<Note[], Error>({
+    queryKey: ['notes', 'list', isPinned],
+    queryFn: () =>
+      apiRequest<Note[]>('GET', '/knowledge/notes', {
+        params: isPinned !== undefined ? { is_pinned: isPinned } : undefined,
+      }),
+    staleTime: 1000 * 30,
+  });
+
+  return {
+    notes: query.data ?? [],
+    isLoading: query.isLoading,
+    isError: query.isError,
+    error: query.error,
+    refetch: query.refetch,
+  };
+}
+
+/**
+ * Mutation hook for creating a new note.
+ */
+export function useCreateNote() {
+  const queryClient = useQueryClient();
+
+  return useMutation<Note, Error, { title: string; content_markdown?: string; is_pinned?: boolean }>({
+    mutationFn: (body) =>
+      apiRequest<Note, { title: string; content_markdown?: string; is_pinned?: boolean }>(
+        'POST',
+        '/knowledge/notes',
+        { body }
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notes'] });
+    },
+  });
+}
+
+/**
  * Hook for semantic/full-text RAG search across knowledge notes.
  */
 export function useNoteSearch(query: string, limit = 10) {

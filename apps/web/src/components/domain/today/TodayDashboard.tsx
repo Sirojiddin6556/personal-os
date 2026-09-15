@@ -7,8 +7,6 @@ import { useTasks } from '@/hooks/useTasks';
 import { useUIStore } from '@/stores/ui-store';
 import { MorningBriefCard } from '../notifications/MorningBriefCard';
 import { TaskCard } from '../tasks/TaskCard';
-import { Task } from '@/types/domain';
-import { formatCurrency } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 
 export function TodayDashboard() {
@@ -17,14 +15,19 @@ export function TodayDashboard() {
     dismissBrief,
     topTasks,
     overdueTasks,
+    overdueCount,
     agenda,
     budgetSummary,
+    habits,
+    freeWindows,
+    handleToggleHabit,
     stats,
   } = useDashboardToday();
 
   const { completeTask } = useTasks();
   const { openQuickAdd, openTaskDetail } = useUIStore();
   const [briefSuccessMsg, setBriefSuccessMsg] = useState<string | null>(null);
+  const [togglingHabitId, setTogglingHabitId] = useState<string | null>(null);
 
   const handleTaskComplete = (id: string) => {
     completeTask(id);
@@ -33,6 +36,18 @@ export function TodayDashboard() {
   const handleTaskEdit = (id: string) => {
     openTaskDetail(id);
   };
+
+  const onToggleHabitClick = async (id: string) => {
+    try {
+      setTogglingHabitId(id);
+      await handleToggleHabit(id);
+    } finally {
+      setTogglingHabitId(null);
+    }
+  };
+
+  const completedHabitsCount = habits.filter((h) => h.completed_today).length;
+  const maxHabitStreak = habits.reduce((max, h) => Math.max(max, h.current_streak), 0);
 
   return (
     <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-6">
@@ -55,7 +70,7 @@ export function TodayDashboard() {
       )}
 
       {/* 1. Overdue Alert Banner (if any overdue tasks) */}
-      {overdueTasks.length > 0 && (
+      {overdueCount > 0 && (
         <div
           role="alert"
           className="flex items-center justify-between p-3.5 sm:p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 shadow-xs"
@@ -66,7 +81,7 @@ export function TodayDashboard() {
             </span>
             <div>
               <p className="text-sm font-bold text-rose-900 dark:text-rose-200">
-                Внимание: {overdueTasks.length} просроченная задача требует решения
+                Внимание: {overdueCount} {overdueCount === 1 ? 'просроченная задача' : 'просроченных задач'} требует решения
               </p>
               <p className="text-xs text-rose-700 dark:text-rose-400">
                 Задачи с истекшим дедлайном блокируют запланированный график дня.
@@ -124,16 +139,28 @@ export function TodayDashboard() {
             </div>
 
             {/* Task list */}
-            <div className="space-y-3">
-              {topTasks.slice(0, 3).map((task) => (
-                <TaskCard
-                  key={task.id}
-                  task={task}
-                  onComplete={handleTaskComplete}
-                  onEdit={handleTaskEdit}
-                />
-              ))}
-            </div>
+            {topTasks.length === 0 ? (
+              <div className="p-8 text-center bg-surface-muted/40 rounded-xl border border-dashed border-border">
+                <p className="text-sm text-text-secondary font-medium">Нет активных задач на сегодня</p>
+                <button
+                  onClick={() => openQuickAdd('task')}
+                  className="mt-2 text-xs text-primary font-semibold hover:underline"
+                >
+                  + Создать первую задачу
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {topTasks.slice(0, 3).map((task) => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    onComplete={handleTaskComplete}
+                    onEdit={handleTaskEdit}
+                  />
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="mt-4 pt-3 border-t border-border-subtle flex items-center justify-between">
@@ -161,7 +188,7 @@ export function TodayDashboard() {
                   Расписание и встречи
                 </h2>
                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300">
-                  {agenda.length} события
+                  {agenda.length} {agenda.length === 1 ? 'событие' : 'события'}
                 </span>
               </div>
               <div className="flex items-center gap-3">
@@ -181,41 +208,57 @@ export function TodayDashboard() {
             </div>
 
             {/* Timeline items */}
-            <div className="space-y-2.5">
-              {agenda.map((item) => {
-                const startTime = item.start || item.start_time || '';
-                const endTime = item.end || item.end_time || '';
-                return (
-                  <div
-                    key={item.id}
-                    className="flex items-center justify-between p-3 rounded-xl bg-surface-muted/60 hover:bg-surface-muted border border-border transition-colors duration-fast"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-bold font-mono text-primary px-2 py-1 bg-primary/10 rounded-md">
-                        {startTime} — {endTime}
-                      </span>
-                      <div>
-                        <p className="text-sm font-semibold text-text-primary">{item.title}</p>
-                        {item.is_external && (
-                          <span className="text-[10px] text-text-muted">
-                            Синхронизировано с Google Calendar
-                          </span>
-                        )}
+            {agenda.length === 0 ? (
+              <div className="p-8 text-center bg-surface-muted/40 rounded-xl border border-dashed border-border">
+                <p className="text-sm text-text-secondary font-medium">Нет запланированных встреч на сегодня</p>
+                <button
+                  onClick={() => openQuickAdd('event')}
+                  className="mt-2 text-xs text-primary font-semibold hover:underline"
+                >
+                  + Добавить встречу или тайм-блок
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                {agenda.map((item) => {
+                  const startTime = item.start || item.start_time || '';
+                  const endTime = item.end || item.end_time || '';
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between p-3 rounded-xl bg-surface-muted/60 hover:bg-surface-muted border border-border transition-colors duration-fast"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-xs font-bold font-mono text-primary px-2 py-1 bg-primary/10 rounded-md">
+                          {startTime} {endTime ? `— ${endTime}` : ''}
+                        </span>
+                        <div>
+                          <p className="text-sm font-semibold text-text-primary">{item.title}</p>
+                          {item.is_external && (
+                            <span className="text-[10px] text-text-muted">
+                              Синхронизировано с Google Calendar
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
 
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: item.color || '#0ea5e9' }}
-                    />
-                  </div>
-                );
-              })}
-            </div>
+                      <span
+                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                        style={{ backgroundColor: item.color || '#0ea5e9' }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           <div className="mt-4 pt-3 border-t border-border-subtle flex items-center justify-between text-xs text-text-muted">
-            <span>Свободное окно: 12:30 — 14:00 (Обед и отдых)</span>
+            <span>
+              {freeWindows.length > 0
+                ? `Свободное окно: ${freeWindows[0].start.slice(11, 16)} — ${freeWindows[0].end.slice(11, 16)} (${freeWindows[0].duration_minutes} мин)`
+                : `Свободное время: ~${stats.freeHours}ч для фокусной работы`}
+            </span>
             <button
               onClick={() => openQuickAdd('event')}
               className="text-primary font-semibold hover:underline"
@@ -289,7 +332,6 @@ export function TodayDashboard() {
           );
         })()}
 
-
         {/* Habits & Focus Streak (2 columns on lg) */}
         <section
           aria-labelledby="habits-summary-heading"
@@ -301,29 +343,51 @@ export function TodayDashboard() {
                 Привычки и продуктивность
               </h2>
               <span className="text-xs font-semibold text-purple-600 dark:text-purple-400">
-                🔥 Стрик: 5 дней
+                🔥 Стрик: {maxHabitStreak} {maxHabitStreak === 1 ? 'день' : maxHabitStreak > 4 ? 'дней' : 'дня'}
               </span>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5 text-xs">
-              <div className="p-2.5 rounded-xl bg-surface-muted border border-border flex items-center justify-between">
-                <span className="font-medium text-text-primary">🏃 Утренняя зарядка</span>
-                <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold">
-                  ✓ Сделано
-                </span>
+            {habits.length === 0 ? (
+              <div className="p-4 text-center bg-surface-muted/30 rounded-xl border border-dashed border-border text-xs text-text-secondary">
+                <span>Нет активных привычек. </span>
+                <Link href="/planner" className="text-primary font-semibold hover:underline">
+                  Добавить в Ежедневнике →
+                </Link>
               </div>
-              <div className="p-2.5 rounded-xl bg-surface-muted border border-border flex items-center justify-between">
-                <span className="font-medium text-text-primary">📚 Чтение 30 мин</span>
-                <button className="px-2 py-0.5 rounded bg-surface border border-border text-text-secondary hover:text-primary font-medium">
-                  Отметить
-                </button>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                {habits.slice(0, 4).map((habit) => (
+                  <div
+                    key={habit.id}
+                    className="p-2.5 rounded-xl bg-surface-muted border border-border flex items-center justify-between gap-2"
+                  >
+                    <span className="font-medium text-text-primary truncate" title={habit.title}>
+                      {habit.title}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={togglingHabitId === habit.id}
+                      onClick={() => onToggleHabitClick(habit.id)}
+                      className={cn(
+                        'px-2 py-0.5 rounded font-medium transition-colors shrink-0 text-xs',
+                        habit.completed_today
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-bold hover:bg-emerald-200'
+                          : 'bg-surface border border-border text-text-secondary hover:text-primary hover:border-primary/50'
+                      )}
+                    >
+                      {habit.completed_today ? '✓ Сделано' : 'Отметить'}
+                    </button>
+                  </div>
+                ))}
               </div>
-            </div>
+            )}
           </div>
 
           <div className="mt-3 pt-2 text-[11px] text-text-muted flex justify-between">
-            <span>Фокусное время сегодня: 2ч 40м</span>
-            <span>Цель: 4ч 00м</span>
+            <span>Выполнено привычек: {completedHabitsCount}/{habits.length}</span>
+            <Link href="/planner" className="text-primary hover:underline">
+              Все привычки →
+            </Link>
           </div>
         </section>
       </div>
