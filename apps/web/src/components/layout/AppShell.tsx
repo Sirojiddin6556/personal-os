@@ -5,6 +5,7 @@ import { SidebarNav } from './SidebarNav';
 import { TopHeader } from './TopHeader';
 import { BottomTabBar } from './BottomTabBar';
 import { QuickAddModal } from '../domain/quick-add/QuickAddModal';
+import { TaskDetailPanel } from '../domain/tasks/TaskDetailPanel';
 import { useUIStore } from '@/stores/ui-store';
 import { cn } from '@/lib/utils';
 
@@ -68,11 +69,11 @@ export function AppShell({ children, rightPanel }: AppShellProps) {
           </div>
 
           <div className="flex-1 overflow-y-auto p-4">
-            {rightPanel || (
+            {rightPanel || (activeTaskId ? <TaskDetailPanel taskId={activeTaskId} /> : (
               <div className="text-xs text-text-muted">
-                {activeTaskId ? `Выбрана задача #${activeTaskId}` : 'Панель контекстных действий'}
+                Панель контекстных действий
               </div>
-            )}
+            ))}
           </div>
         </aside>
       )}

@@ -129,6 +129,8 @@ export interface Task {
   title: string;
   /** Detailed Markdown-formatted body */
   description_markdown?: string;
+  /** API compatibility alias used by the backend task schema */
+  description?: string | null;
   /** Current state machine status */
   status: TaskStatus | TaskStatusType;
   /** Execution priority tier */
@@ -709,4 +711,3 @@ export interface ProjectCreateInput {
   github_repo?: string | null;
   github_default_branch?: string | null;
 }
-
