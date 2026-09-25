@@ -1,14 +1,16 @@
 """Tasks domain service with idempotency, optimistic locking, and transactional outbox."""
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.domains.tasks.models import Priority, Task, TaskStatus
+from src.domains.tasks.models import Attachment, Priority, Task, TaskStatus
 from src.domains.tasks.schemas import (
+    AttachmentResponse,
     KanbanBoardResponse,
     KanbanColumnResponse,
     TaskCreate,
@@ -383,5 +385,97 @@ class TaskService:
             body=TaskUpdate(status=TaskStatus.DONE.value),
         )
 
+    async def add_attachment(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        filename: str,
+        stored_filename: str,
+        file_size: int,
+        content_type: str,
+        task_id: Optional[UUID] = None,
+        project_id: Optional[UUID] = None,
+    ) -> AttachmentResponse:
+        """Link an uploaded file to a task or project."""
+        if task_id:
+            await self.get_by_id(session, workspace_id, task_id)
+        attachment = Attachment(
+            id=uuid4(),
+            workspace_id=workspace_id,
+            task_id=task_id,
+            project_id=project_id,
+            filename=filename,
+            stored_filename=stored_filename,
+            file_size=file_size,
+            content_type=content_type,
+        )
+        session.add(attachment)
+        await session.commit()
+        await session.refresh(attachment)
+        return AttachmentResponse.model_validate(attachment)
+
+    async def list_attachments(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        task_id: Optional[UUID] = None,
+        project_id: Optional[UUID] = None,
+    ) -> List[AttachmentResponse]:
+        """List attachments for a task, project, or workspace."""
+        stmt = select(Attachment).where(Attachment.workspace_id == workspace_id)
+        if task_id:
+            stmt = stmt.where(Attachment.task_id == task_id)
+        elif project_id:
+            stmt = stmt.where(
+                (Attachment.project_id == project_id)
+                | (
+                    Attachment.task_id.in_(
+                        select(Task.id).where(
+                            Task.project_id == project_id,
+                            Task.workspace_id == workspace_id,
+                            Task.is_deleted.is_(False),
+                        )
+                    )
+                )
+            )
+        stmt = stmt.order_by(desc(Attachment.created_at))
+        result = await session.execute(stmt)
+        return [AttachmentResponse.model_validate(a) for a in result.scalars().all()]
+
+    async def get_attachment(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        attachment_id: UUID,
+    ) -> Attachment:
+        """Retrieve attachment by ID."""
+        stmt = select(Attachment).where(
+            Attachment.id == attachment_id,
+            Attachment.workspace_id == workspace_id,
+        )
+        result = await session.execute(stmt)
+        attachment = result.scalar_one_or_none()
+        if not attachment:
+            raise NotFoundError(resource="Attachment", identifier=attachment_id)
+        return attachment
+
+    async def delete_attachment(
+        self,
+        session: AsyncSession,
+        workspace_id: UUID,
+        attachment_id: UUID,
+    ) -> None:
+        """Delete an attachment record and remove underlying file from storage."""
+        attachment = await self.get_attachment(session, workspace_id, attachment_id)
+        try:
+            p = Path(attachment.stored_filename)
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
+        await session.delete(attachment)
+        await session.commit()
+
 
 task_service = TaskService()
+

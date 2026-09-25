@@ -163,12 +163,28 @@ export interface Task {
   completed_at?: string | null;
   /** Subtask checklist items */
   subtasks?: Subtask[];
+  /** File attachments associated with this task */
+  attachments?: TaskAttachment[];
   /** Monotonically increasing version counter for optimistic locking (If-Match) */
   version?: number;
   /** Creation timestamp (ISO 8601 UTC) */
   created_at: string;
   /** Last update timestamp (ISO 8601 UTC) */
   updated_at: string;
+}
+
+/**
+ * File attachment associated with a task or project.
+ */
+export interface TaskAttachment {
+  id: string;
+  workspace_id?: string;
+  task_id?: string | null;
+  project_id?: string | null;
+  filename: string;
+  file_size: number;
+  content_type: string;
+  created_at: string;
 }
 
 /**

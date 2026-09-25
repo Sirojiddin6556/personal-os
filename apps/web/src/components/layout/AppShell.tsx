@@ -42,13 +42,21 @@ export function AppShell({ children, rightPanel }: AppShellProps) {
 
       {/* Optional Right Slide-over Panel (Context Preservation: UX principle) */}
       {(isRightPanelOpen || rightPanel) && (
-        <aside
-          aria-label="Боковая панель деталей"
-          className={cn(
-            'fixed lg:static inset-y-0 right-0 z-40 w-full sm:w-[420px] bg-surface border-l border-border shadow-xl lg:shadow-none flex flex-col transition-transform duration-slow',
-            'animate-in slide-in-from-right duration-250'
-          )}
-        >
+        <>
+          <div
+            className="fixed inset-0 bg-black/40 backdrop-blur-xs z-30 lg:hidden"
+            onClick={() => {
+              closeRightPanel();
+              closeTaskDetail();
+            }}
+          />
+          <aside
+            aria-label="Боковая панель деталей"
+            className={cn(
+              'fixed lg:static inset-y-0 right-0 z-40 w-full sm:w-[420px] bg-surface border-l border-border shadow-xl lg:shadow-none flex flex-col transition-transform duration-slow',
+              'animate-in slide-in-from-right duration-250'
+            )}
+          >
           <div className="h-16 px-4 border-b border-border flex items-center justify-between">
             <h3 className="text-sm font-bold text-text-primary">
               {activeTaskId ? 'Детали задачи' : 'Информация'}
@@ -76,7 +84,8 @@ export function AppShell({ children, rightPanel }: AppShellProps) {
             ))}
           </div>
         </aside>
-      )}
+      </>
+    )}
 
       {/* Global Quick Add Dialog (Cmd+K / + FAB) */}
       <QuickAddModal />

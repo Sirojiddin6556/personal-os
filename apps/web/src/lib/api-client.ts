@@ -228,10 +228,14 @@ export async function apiRequest<TData, TBody = unknown>(
   }
 
   // Request body
-  let requestBody: string | undefined;
+  let requestBody: any;
   if (body !== undefined) {
-    requestHeaders['Content-Type'] = 'application/json';
-    requestBody = JSON.stringify(body);
+    if (typeof FormData !== 'undefined' && body instanceof FormData) {
+      requestBody = body;
+    } else {
+      requestHeaders['Content-Type'] = 'application/json';
+      requestBody = JSON.stringify(body);
+    }
   }
 
   // 3. Execute Fetch
@@ -335,7 +339,7 @@ export async function fetchPaginated<TItem>(
   path: string,
   options: FetchPaginatedOptions = {}
 ): Promise<PaginatedResponse<TItem>> {
-  const { cursor, limit = 50, filters = {}, signal } = options;
+  const { cursor, limit = 200, filters = {}, signal } = options;
 
   const raw = await apiRequest<any>('GET', path, {
     params: {

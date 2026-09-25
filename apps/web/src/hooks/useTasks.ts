@@ -16,6 +16,7 @@ import { queryKeys } from '@/lib/query-keys';
 import React from 'react';
 import {
   Task,
+  TaskAttachment,
   TaskStatus,
   TaskStatusType,
   Priority,
@@ -71,6 +72,7 @@ export interface MoveTaskInput {
 export interface CompleteTaskInput {
   id: string;
   version: number;
+  status?: TaskStatus;
 }
 
 /**
@@ -83,16 +85,24 @@ export function useTasksList(filters?: TaskFilterParams) {
     queryFn: ({ pageParam }) =>
       fetchPaginated<Task>('/tasks', {
         cursor: (pageParam as string | null) || undefined,
-        limit: filters?.limit || 50,
+        limit: filters?.limit || 200,
         filters: filters as Record<string, string | number | boolean | undefined>,
       }),
     getNextPageParam: (lastPage) =>
       lastPage?.pagination?.has_more ? lastPage.pagination.next_cursor : undefined,
   });
 
+  const { data, hasNextPage, fetchNextPage } = query;
+
+  React.useEffect(() => {
+    if (hasNextPage) {
+      fetchNextPage();
+    }
+  }, [hasNextPage, fetchNextPage]);
+
   const tasks: Task[] = React.useMemo(
-    () => query.data?.pages.flatMap((page) => page.items) ?? [],
-    [query.data]
+    () => data?.pages.flatMap((page) => page.items) ?? [],
+    [data]
   );
 
   return {
@@ -313,15 +323,15 @@ export function useCompleteTask() {
       previousQueries: Array<[readonly unknown[], unknown]>;
     }
   >({
-    mutationFn: ({ id, version }: CompleteTaskInput) =>
-      apiRequest<Task, { status: TaskStatus; completed_at: string }>('PATCH', `/tasks/${id}`, {
+    mutationFn: ({ id, version, status = TaskStatus.DONE }: CompleteTaskInput) =>
+      apiRequest<Task, { status: TaskStatus; completed_at: string | null }>('PATCH', `/tasks/${id}`, {
         body: {
-          status: TaskStatus.DONE,
-          completed_at: new Date().toISOString(),
+          status,
+          completed_at: status === TaskStatus.DONE ? new Date().toISOString() : null,
         },
         version,
       }),
-    onMutate: async ({ id, version }) => {
+    onMutate: async ({ id, version, status = TaskStatus.DONE }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.tasks.all });
 
       const previousDetail = queryClient.getQueryData<Task>(queryKeys.tasks.detail(id));
@@ -331,8 +341,8 @@ export function useCompleteTask() {
       const previousQueries = queries.map(([key, data]) => [key, data] as [readonly unknown[], unknown]);
 
       const patch = {
-        status: TaskStatus.DONE,
-        completed_at: new Date().toISOString(),
+        status,
+        completed_at: status === TaskStatus.DONE ? new Date().toISOString() : null,
         version: version + 1,
         updated_at: new Date().toISOString(),
       };
@@ -504,11 +514,13 @@ export function useTasks(filters?: {
   project?: string;
   search?: string;
 }) {
-  const { tasks: serverTasks, isLoading, refetch } = useTasksList();
+  const queryClient = useQueryClient();
+  const { tasks: serverTasks, isLoading, refetch } = useTasksList({ limit: 200 });
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const moveTaskMutation = useMoveTask();
   const completeTaskMutation = useCompleteTask();
   const deleteTaskMutation = useDeleteTask();
+  const updateTaskMutation = useUpdateTask();
 
   React.useEffect(() => {
     if (serverTasks) {
@@ -532,15 +544,31 @@ export function useTasks(filters?: {
         const q = filters.search.toLowerCase();
         return (
           task.title.toLowerCase().includes(q) ||
-          (task.description_markdown && task.description_markdown.toLowerCase().includes(q))
+          Boolean(task.description_markdown && task.description_markdown.toLowerCase().includes(q)) ||
+          Boolean(task.description && task.description.toLowerCase().includes(q))
         );
       }
       return true;
     });
   }, [tasks, serverTasks, filters]);
 
+  const getTaskVersion = React.useCallback(
+    (taskId: string): number => {
+      const fromLocal = tasks.find((t) => t.id === taskId);
+      if (fromLocal?.version) return fromLocal.version;
+      const fromServer = serverTasks.find((t) => t.id === taskId);
+      if (fromServer?.version) return fromServer.version;
+      const fromCache = queryClient.getQueryData<Task>(queryKeys.tasks.detail(taskId));
+      if (fromCache?.version) return fromCache.version;
+      return 1;
+    },
+    [tasks, serverTasks, queryClient]
+  );
+
   const moveTask = React.useCallback(
     (taskId: string, targetStatus: TaskStatus | TaskStatusType, newIndex?: number) => {
+      const currentVersion = getTaskVersion(taskId);
+
       setTasks((prev) =>
         prev.map((t) =>
           t.id === taskId
@@ -548,6 +576,7 @@ export function useTasks(filters?: {
                 ...t,
                 status: targetStatus as TaskStatus,
                 sort_order: newIndex !== undefined ? newIndex : t.sort_order,
+                version: currentVersion + 1,
                 updated_at: new Date().toISOString(),
               }
             : t
@@ -555,39 +584,74 @@ export function useTasks(filters?: {
       );
       moveTaskMutation.mutate({
         id: taskId,
-        version: 1,
+        version: currentVersion,
         status: targetStatus as TaskStatus,
         sort_order: newIndex,
       });
     },
-    [moveTaskMutation]
+    [moveTaskMutation, getTaskVersion]
   );
 
   const completeTask = React.useCallback(
     (taskId: string) => {
+      const currentTask = tasks.find((t) => t.id === taskId) || serverTasks.find((t) => t.id === taskId);
+      const isCurrentlyDone = currentTask?.status === TaskStatus.DONE;
+      const newStatus = isCurrentlyDone ? TaskStatus.TODO : TaskStatus.DONE;
+      const currentVersion = getTaskVersion(taskId);
+
       setTasks((prev) =>
         prev.map((t) =>
           t.id === taskId
             ? {
                 ...t,
-                status: t.status === TaskStatus.DONE ? TaskStatus.TODO : TaskStatus.DONE,
-                completed_at: t.status === TaskStatus.DONE ? null : new Date().toISOString(),
+                status: newStatus,
+                completed_at: isCurrentlyDone ? null : new Date().toISOString(),
+                version: currentVersion + 1,
                 updated_at: new Date().toISOString(),
               }
             : t
         )
       );
-      completeTaskMutation.mutate({ id: taskId, version: 1 });
+      completeTaskMutation.mutate({
+        id: taskId,
+        version: currentVersion,
+        status: newStatus,
+      });
     },
-    [completeTaskMutation]
+    [completeTaskMutation, getTaskVersion, tasks, serverTasks]
   );
 
   const deleteTask = React.useCallback(
     (taskId: string) => {
+      const currentVersion = getTaskVersion(taskId);
       setTasks((prev) => prev.filter((t) => t.id !== taskId));
-      deleteTaskMutation.mutate({ id: taskId });
+      deleteTaskMutation.mutate({ id: taskId, version: currentVersion });
     },
-    [deleteTaskMutation]
+    [deleteTaskMutation, getTaskVersion]
+  );
+
+  const updateTask = React.useCallback(
+    (input: UpdateTaskInput) => {
+      const currentVersion = input.version ?? getTaskVersion(input.id);
+
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === input.id
+            ? {
+                ...t,
+                ...input,
+                version: currentVersion + 1,
+                updated_at: new Date().toISOString(),
+              }
+            : t
+        )
+      );
+      return updateTaskMutation.mutateAsync({
+        ...input,
+        version: currentVersion,
+      });
+    },
+    [updateTaskMutation, getTaskVersion]
   );
 
   return {
@@ -598,28 +662,108 @@ export function useTasks(filters?: {
     moveTask,
     completeTask,
     deleteTask,
+    updateTask,
   };
 }
 
 export function useTaskMutations() {
+  const queryClient = useQueryClient();
   const moveTaskMutation = useMoveTask();
   const completeTaskMutation = useCompleteTask();
   const deleteTaskMutation = useDeleteTask();
 
+  const getTaskVersion = (taskId: string): number => {
+    const detail = queryClient.getQueryData<Task>(queryKeys.tasks.detail(taskId));
+    if (detail?.version) return detail.version;
+    const queries = queryClient.getQueriesData<InfiniteData<PaginatedResponse<Task>>>({
+      queryKey: queryKeys.tasks.all,
+    });
+    for (const [, data] of queries) {
+      if (data?.pages) {
+        for (const page of data.pages) {
+          const found = page.items?.find((item) => item.id === taskId);
+          if (found?.version) return found.version;
+        }
+      }
+    }
+    return 1;
+  };
+
   return {
     moveTaskOptimistic: (params: { taskId: string; targetColumnOrTaskId: string }) => {
+      const version = getTaskVersion(params.taskId);
       moveTaskMutation.mutate({
         id: params.taskId,
-        version: 1,
+        version,
         status: params.targetColumnOrTaskId as TaskStatus,
       });
     },
-    completeTask: (taskId: string) => {
-      completeTaskMutation.mutate({ id: taskId, version: 1 });
+    completeTask: (taskId: string, targetStatus?: TaskStatus) => {
+      const version = getTaskVersion(taskId);
+      completeTaskMutation.mutate({ id: taskId, version, status: targetStatus });
     },
     deleteTask: (taskId: string) => {
-      deleteTaskMutation.mutate({ id: taskId });
+      const version = getTaskVersion(taskId);
+      deleteTaskMutation.mutate({ id: taskId, version });
     },
   };
 }
+
+export function useTaskAttachments(taskId?: string) {
+  return useQuery<TaskAttachment[], Error>({
+    queryKey: ['tasks', taskId, 'attachments'],
+    queryFn: () => apiRequest<TaskAttachment[]>('GET', `/tasks/${taskId}/attachments`),
+    enabled: Boolean(taskId),
+  });
+}
+
+export function useUploadTaskAttachment() {
+  const queryClient = useQueryClient();
+  return useMutation<TaskAttachment, Error, { taskId: string; file: File }>({
+    mutationFn: ({ taskId, file }) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      return apiRequest<TaskAttachment>('POST', `/tasks/${taskId}/attachments`, {
+        body: formData as unknown as undefined,
+      });
+    },
+    onSuccess: (_, { taskId }) => {
+      queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'attachments'] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.detail(taskId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
+      queryClient.invalidateQueries({ queryKey: ['attachments'] });
+    },
+  });
+}
+
+export function useProjectAttachments(projectId?: string) {
+  return useQuery<TaskAttachment[], Error>({
+    queryKey: ['attachments', 'project', projectId],
+    queryFn: () =>
+      apiRequest<TaskAttachment[]>('GET', '/attachments', {
+        params: projectId ? { project_id: projectId } : undefined,
+      }),
+    enabled: Boolean(projectId),
+  });
+}
+
+export function useDeleteAttachment() {
+  const queryClient = useQueryClient();
+  return useMutation<void, Error, { attachmentId: string; taskId?: string; projectId?: string }>({
+    mutationFn: ({ attachmentId }) =>
+      apiRequest<void>('DELETE', `/attachments/${attachmentId}`),
+    onSuccess: (_, { taskId, projectId }) => {
+      if (taskId) {
+        queryClient.invalidateQueries({ queryKey: ['tasks', taskId, 'attachments'] });
+        queryClient.invalidateQueries({ queryKey: queryKeys.tasks.detail(taskId) });
+      }
+      if (projectId) {
+        queryClient.invalidateQueries({ queryKey: ['attachments', 'project', projectId] });
+      }
+      queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
+      queryClient.invalidateQueries({ queryKey: ['attachments'] });
+    },
+  });
+}
+
 

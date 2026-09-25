@@ -68,7 +68,15 @@ export function KanbanBoard({
     const sourceTaskId = String(active.id);
     const overId = String(over.id);
 
-    // 1. Check if dropped directly onto a column container
+    if (sourceTaskId === overId) return;
+
+    // 1. Check if dropped directly onto a column container (either by data or ID)
+    const columnFromData = over.data?.current?.columnId as TaskStatus | undefined;
+    if (columnFromData) {
+      onMoveTask(sourceTaskId, columnFromData);
+      return;
+    }
+
     const targetColumn = KANBAN_COLUMNS.find((col) => col.id === overId || String(col.id) === overId);
     if (targetColumn) {
       onMoveTask(sourceTaskId, targetColumn.id);

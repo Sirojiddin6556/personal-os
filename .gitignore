@@ -53,3 +53,8 @@ alembic/versions/__pycache__/
 # Test reports
 playwright-report/
 test-results/
+
+# Uploads and user data
+data/
+uploads/
+

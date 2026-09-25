@@ -75,10 +75,12 @@ export function TaskCard({
     <div
       ref={setNodeRef}
       style={style}
+      {...attributes}
+      {...listeners}
       role="article"
       aria-label={`Задача: ${task.title}`}
       className={cn(
-        'group relative flex flex-col p-3 bg-surface hover:bg-surface border border-border hover:border-primary/40 rounded-xl shadow-xs hover:shadow-md transition-all duration-150 select-none text-left',
+        'group relative flex flex-col p-3 bg-surface hover:bg-surface border border-border hover:border-primary/40 rounded-xl shadow-xs hover:shadow-md transition-all duration-150 select-none text-left cursor-grab active:cursor-grabbing',
         isDragging && 'opacity-50 ring-2 ring-primary shadow-xl scale-[1.02]',
         isCompleted && 'opacity-65'
       )}
@@ -86,14 +88,10 @@ export function TaskCard({
       {/* Top row: Drag handle, Project tag, Priority badge */}
       <div className="flex items-center justify-between gap-2 mb-2">
         <div className="flex items-center gap-1.5 min-w-0">
-          {/* Drag Handle */}
-          <button
-            {...attributes}
-            {...listeners}
-            type="button"
-            tabIndex={0}
-            aria-label="Перетащить карточку"
-            className="p-1 -ml-1 text-text-muted hover:text-text-primary cursor-grab active:cursor-grabbing rounded focus:outline-none focus:ring-1 focus:ring-primary"
+          {/* Drag Handle Icon */}
+          <div
+            aria-hidden="true"
+            className="p-1 -ml-1 text-text-muted group-hover:text-text-primary transition-colors cursor-grab active:cursor-grabbing"
           >
             <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
               <circle cx="9" cy="6" r="1.5" />
@@ -103,7 +101,7 @@ export function TaskCard({
               <circle cx="9" cy="18" r="1.5" />
               <circle cx="15" cy="18" r="1.5" />
             </svg>
-          </button>
+          </div>
 
           {/* Project Tag */}
           {linkedProject && (
@@ -125,6 +123,7 @@ export function TaskCard({
             <select
               aria-label={`Изменить статус задачи ${task.title}`}
               value={task.status}
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => {
                 e.stopPropagation();
@@ -150,10 +149,29 @@ export function TaskCard({
             !{task.priority}
           </span>
 
+          {/* Edit Button */}
+          <button
+            type="button"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit(task.id);
+            }}
+            aria-label={`Редактировать задачу ${task.title}`}
+            title="Редактировать задачу"
+            className="p-1 text-text-muted hover:text-primary hover:bg-surface-muted rounded transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+          </button>
+
           {/* Delete Button */}
           {onDelete && (
             <button
               type="button"
+              onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete(task.id);
@@ -171,18 +189,19 @@ export function TaskCard({
         </div>
       </div>
 
-
       {/* Middle row: Checkbox + Title */}
       <div className="flex items-start gap-2.5 mb-2">
         <input
           type="checkbox"
           checked={isCompleted}
+          onPointerDown={(e) => e.stopPropagation()}
           onChange={() => onComplete(task.id)}
           aria-label={isCompleted ? 'Отметить невыполненной' : 'Отметить выполненной'}
           className="mt-0.5 w-4 h-4 rounded border-border text-primary focus:ring-primary/20 cursor-pointer shrink-0 transition-colors"
         />
         <button
           type="button"
+          onPointerDown={(e) => e.stopPropagation()}
           onClick={() => onEdit(task.id)}
           className={cn(
             'text-sm font-medium text-text-primary leading-snug text-left group-hover:text-primary transition-colors focus:outline-none focus:underline',
@@ -192,6 +211,61 @@ export function TaskCard({
           {task.title}
         </button>
       </div>
+
+      {/* Attached Files directly on the card */}
+      {task.attachments && task.attachments.length > 0 && (
+        <div className="flex flex-col gap-1.5 mb-2.5">
+          {task.attachments.map((att) => {
+            const isPdf = att.filename.toLowerCase().endsWith('.pdf');
+            const isWord =
+              att.filename.toLowerCase().endsWith('.docx') ||
+              att.filename.toLowerCase().endsWith('.doc');
+            const downloadUrl = `http://localhost:8008/v1/attachments/${att.id}/download`;
+
+            return (
+              <a
+                key={att.id}
+                href={downloadUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                download={att.filename}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                title={`Скачать ${att.filename} (${(att.file_size / (1024 * 1024)).toFixed(1)} MB)`}
+                className="flex items-center gap-2 px-2 py-1 rounded-lg bg-surface-muted hover:bg-primary/10 border border-border hover:border-primary/50 text-[11px] font-medium text-text-primary hover:text-primary transition-all group/att cursor-pointer"
+              >
+                <span
+                  className={cn(
+                    'font-mono text-[9px] font-bold px-1 py-0.5 rounded uppercase shrink-0',
+                    isPdf
+                      ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/80 dark:text-rose-300'
+                      : isWord
+                      ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/80 dark:text-blue-300'
+                      : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+                  )}
+                >
+                  {isPdf ? 'PDF' : isWord ? 'DOCX' : 'FILE'}
+                </span>
+                <span className="truncate flex-1 font-sans">{att.filename}</span>
+                <span className="text-[10px] text-text-muted shrink-0">
+                  {(att.file_size / (1024 * 1024)).toFixed(1)} MB
+                </span>
+                <svg
+                  className="w-3 h-3 text-text-muted group-hover/att:text-primary shrink-0 transition-transform group-hover/att:translate-y-0.5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+              </a>
+            );
+          })}
+        </div>
+      )}
 
       {/* Bottom row: Due Date + Subtasks */}
       <div className="flex items-center justify-between pt-2 border-t border-border-subtle text-xs text-text-secondary">
@@ -218,18 +292,30 @@ export function TaskCard({
           <span />
         )}
 
-        {/* Subtask count */}
-        {subtasks.length > 0 && (
-          <div className="flex items-center gap-1 text-text-muted">
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="9 11 12 14 22 4" />
-              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-            </svg>
-            <span>
-              {completedSubtasks}/{subtasks.length}
-            </span>
-          </div>
-        )}
+        <div className="flex items-center gap-2 text-text-muted">
+          {/* Attachments count */}
+          {task.attachments && task.attachments.length > 0 && (
+            <div className="flex items-center gap-0.5 text-text-muted" title={`Вложений: ${task.attachments.length}`}>
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+              </svg>
+              <span className="text-[11px]">{task.attachments.length}</span>
+            </div>
+          )}
+
+          {/* Subtask count */}
+          {subtasks.length > 0 && (
+            <div className="flex items-center gap-1 text-text-muted">
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="9 11 12 14 22 4" />
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+              </svg>
+              <span>
+                {completedSubtasks}/{subtasks.length}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

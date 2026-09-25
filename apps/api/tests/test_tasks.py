@@ -122,3 +122,42 @@ async def test_cross_tenant_isolation(client_a: AsyncClient, client_b: AsyncClie
 
     r = await client_a.get(f'/v1/tasks/{task_b["id"]}', headers=auth_headers_a)
     assert r.status_code in (403, 404)  # Изоляция
+
+
+async def test_task_attachments_lifecycle(client: AsyncClient, auth_headers):
+    """Upload, list, download, and delete task attachments."""
+    # 1. Create a task
+    task = (await client.post('/v1/tasks', json={'title': 'Task with attachments'}, headers=auth_headers)).json()
+    task_id = task['id']
+
+    # 2. Upload an attachment
+    file_content = b"packet capture analysis evidence"
+    files = {'file': ('evidence.pcap', file_content, 'application/vnd.tcpdump.pcap')}
+    upload_res = await client.post(f'/v1/tasks/{task_id}/attachments', files=files, headers=auth_headers)
+    assert upload_res.status_code == 201
+    attachment = upload_res.json()
+    assert attachment['filename'] == 'evidence.pcap'
+    assert attachment['file_size'] == len(file_content)
+    att_id = attachment['id']
+
+    # 3. List attachments for the task
+    list_res = await client.get(f'/v1/tasks/{task_id}/attachments', headers=auth_headers)
+    assert list_res.status_code == 200
+    items = list_res.json()
+    assert len(items) == 1
+    assert items[0]['id'] == att_id
+
+    # 4. Download the attachment
+    dl_res = await client.get(f'/v1/attachments/{att_id}/download', headers=auth_headers)
+    assert dl_res.status_code == 200
+    assert dl_res.content == file_content
+
+    # 5. Delete the attachment
+    del_res = await client.delete(f'/v1/attachments/{att_id}', headers=auth_headers)
+    assert del_res.status_code == 204
+
+    # 6. Verify empty list after deletion
+    list_res2 = await client.get(f'/v1/tasks/{task_id}/attachments', headers=auth_headers)
+    assert list_res2.status_code == 200
+    assert len(list_res2.json()) == 0
+

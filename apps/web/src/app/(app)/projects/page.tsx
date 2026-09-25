@@ -15,7 +15,8 @@ import {
   useProjects,
   useSyncProjectIssues,
 } from '@/hooks/useGitHub';
-import { useCreateTask, useTasks } from '@/hooks/useTasks';
+import { useCreateTask, useTasks, useProjectAttachments } from '@/hooks/useTasks';
+import { ProjectAttachmentsTab } from '@/components/domain/projects/ProjectAttachmentsTab';
 import { useUIStore } from '@/stores/ui-store';
 import { Priority, Project, TaskPriority, TaskStatus } from '@/types/domain';
 import { cn, formatDateShort } from '@/lib/utils';
@@ -35,7 +36,7 @@ export default function ProjectsPage() {
   const { tasks: allTasks, completeTask, deleteTask } = useTasks();
 
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'files' | 'commits' | 'tasks'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'files' | 'commits' | 'attachments'>('overview');
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [repoSearchQuery, setRepoSearchQuery] = useState('');
   const [isCreatingProject, setIsCreatingProject] = useState(false);
@@ -171,6 +172,13 @@ export default function ProjectsPage() {
   const projectTasks = allTasks.filter(
     (t) => t.project_id === activeProject?.id || t.project?.name === activeProject?.name
   );
+
+  const { data: serverAttachments = [] } = useProjectAttachments(activeProject?.id);
+  const totalAttachmentsCount = React.useMemo(() => {
+    const direct = serverAttachments.length;
+    const fromTasks = projectTasks.reduce((acc, t) => acc + (t.attachments?.length || 0), 0);
+    return Math.max(direct, fromTasks);
+  }, [serverAttachments, projectTasks]);
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
@@ -415,6 +423,30 @@ export default function ProjectsPage() {
                     Обзор & Задачи ({projectTasks.length})
                   </button>
 
+                  <button
+                    onClick={() => setActiveTab('attachments')}
+                    className={cn(
+                      'px-3 py-1.5 text-xs font-bold rounded-lg transition-colors flex items-center gap-1.5',
+                      activeTab === 'attachments'
+                        ? 'bg-primary text-white shadow-xs'
+                        : 'text-text-muted hover:text-text-primary hover:bg-surface'
+                    )}
+                  >
+                    <span>📎 Вложения & ТЗ</span>
+                    {totalAttachmentsCount > 0 && (
+                      <span
+                        className={cn(
+                          'px-1.5 py-0.2 rounded-full text-[10px] font-bold',
+                          activeTab === 'attachments'
+                            ? 'bg-white text-primary'
+                            : 'bg-primary/10 text-primary'
+                        )}
+                      >
+                        {totalAttachmentsCount}
+                      </span>
+                    )}
+                  </button>
+
                   {activeProject.github_repo && (
                     <>
                       <button
@@ -510,14 +542,38 @@ export default function ProjectsPage() {
                                 onChange={() => completeTask(t.id)}
                                 className="w-4 h-4 rounded border-border text-primary cursor-pointer shrink-0"
                               />
-                              <span
-                                className={cn(
-                                  'text-xs font-medium text-text-primary truncate',
-                                  t.status === 'done' && 'line-through text-text-muted'
+                              <div className="flex flex-col min-w-0">
+                                <span
+                                  className={cn(
+                                    'text-xs font-medium text-text-primary truncate',
+                                    t.status === 'done' && 'line-through text-text-muted'
+                                  )}
+                                >
+                                  {t.title}
+                                </span>
+                                {t.attachments && t.attachments.length > 0 && (
+                                  <div className="flex flex-wrap gap-1.5 mt-1">
+                                    {t.attachments.map((att) => (
+                                      <a
+                                        key={att.id}
+                                        href={`http://localhost:8008/v1/attachments/${att.id}/download`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        download={att.filename}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-surface-muted hover:bg-primary/10 text-text-secondary hover:text-primary border border-border hover:border-primary/40 transition-colors"
+                                        title={`Скачать ${att.filename}`}
+                                      >
+                                        <span>📎</span>
+                                        <span className="truncate max-w-[160px] font-medium">{att.filename}</span>
+                                        <span className="text-text-muted text-[9px]">
+                                          ({(att.file_size / (1024 * 1024)).toFixed(1)} MB)
+                                        </span>
+                                      </a>
+                                    ))}
+                                  </div>
                                 )}
-                              >
-                                {t.title}
-                              </span>
+                              </div>
                             </div>
 
                             <div className="flex items-center gap-2 shrink-0">
@@ -702,6 +758,15 @@ export default function ProjectsPage() {
                     </div>
                   )}
                 </div>
+              )}
+
+              {/* Tab 4: Attachments & Documents */}
+              {activeTab === 'attachments' && activeProject && (
+                <ProjectAttachmentsTab
+                  projectId={activeProject.id}
+                  projectName={activeProject.name}
+                  projectTasks={projectTasks}
+                />
               )}
             </div>
           ) : (

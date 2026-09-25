@@ -57,6 +57,19 @@ class TaskUpdate(BaseModel):
         return normalize_priority(value) if value is not None else None
 
 
+class AttachmentResponse(BaseModel):
+    id: UUID
+    workspace_id: UUID
+    task_id: Optional[UUID] = None
+    project_id: Optional[UUID] = None
+    filename: str
+    file_size: int
+    content_type: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class TaskResponse(BaseModel):
     id: UUID
     workspace_id: UUID
@@ -77,6 +90,7 @@ class TaskResponse(BaseModel):
     cancelled_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+    attachments: List[AttachmentResponse] = []
 
     model_config = {"from_attributes": True}
 
@@ -89,3 +103,4 @@ class KanbanColumnResponse(BaseModel):
 
 class KanbanBoardResponse(BaseModel):
     columns: Dict[str, KanbanColumnResponse]
+

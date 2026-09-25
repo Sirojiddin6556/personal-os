@@ -336,4 +336,25 @@ describe('fetchPaginated helper', () => {
     expect(url).toContain('limit=25');
     expect(url).toContain('status=inbox');
   });
+
+  it('handles FormData request bodies without overriding Content-Type', async () => {
+    (global.fetch as any).mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: 'att-1', filename: 'file.txt' }),
+    });
+
+    const formData = new FormData();
+    formData.append('file', new Blob(['test']), 'file.txt');
+
+    const res = await apiRequest('POST', '/tasks/123/attachments', {
+      body: formData as any,
+    });
+
+    expect(res).toEqual({ id: 'att-1', filename: 'file.txt' });
+    const [, options] = (global.fetch as any).mock.calls[0];
+    expect(options.body).toBe(formData);
+    expect(options.headers['Content-Type']).toBeUndefined();
+  });
 });
+

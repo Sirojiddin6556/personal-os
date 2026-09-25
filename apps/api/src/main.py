@@ -23,7 +23,11 @@ from src.domains.projects.router import (
     milestones_router,
     router as projects_router,
 )
-from src.domains.tasks.router import kanban_router, router as tasks_router
+from src.domains.tasks.router import (
+    attachments_router,
+    kanban_router,
+    router as tasks_router,
+)
 from src.integrations.github.router import router as github_router
 from src.integrations.google_calendar.router import router as google_router
 from src.integrations.telegram.router import (
@@ -165,6 +169,7 @@ def create_app() -> FastAPI:
 
     app.include_router(identity_router, prefix=v1_prefix)
     app.include_router(tasks_router, prefix=v1_prefix)
+    app.include_router(attachments_router, prefix=v1_prefix)
     app.include_router(kanban_router, prefix=v1_prefix)
     app.include_router(projects_router, prefix=v1_prefix)
     app.include_router(goals_router, prefix=v1_prefix)

@@ -13,7 +13,7 @@ from src.config import settings
 from src.domains.finance.models import Account, Transaction
 from src.domains.identity.models import User, Workspace
 from src.domains.knowledge.models import Note, NoteChunk
-from src.domains.tasks.models import Priority, Task, TaskStatus
+from src.domains.tasks.models import Attachment, Priority, Task, TaskStatus
 from src.integrations.models import Integration
 from src.main import app
 from src.shared.deps import (
@@ -64,6 +64,7 @@ class InMemoryDB:
         self.notes: Dict[UUID, Note] = {}
         self.note_chunks: Dict[UUID, NoteChunk] = {}
         self.integrations: Dict[UUID, Integration] = {}
+        self.attachments: Dict[UUID, Attachment] = {}
         self.outbox: List[OutboxEvent] = []
 
     def clear(self):
@@ -73,6 +74,7 @@ class InMemoryDB:
         self.notes.clear()
         self.note_chunks.clear()
         self.integrations.clear()
+        self.attachments.clear()
         self.outbox.clear()
 
 
@@ -105,8 +107,16 @@ class FakeAsyncSession:
             self.db.note_chunks[obj.id] = obj
         elif isinstance(obj, Integration):
             self.db.integrations[obj.id] = obj
+        elif isinstance(obj, Attachment):
+            self.db.attachments[obj.id] = obj
         elif isinstance(obj, OutboxEvent):
             self.db.outbox.append(obj)
+
+    async def delete(self, obj: Any) -> None:
+        if isinstance(obj, Attachment):
+            self.db.attachments.pop(obj.id, None)
+        elif isinstance(obj, Task):
+            self.db.tasks.pop(obj.id, None)
 
     async def commit(self) -> None:
         pass
@@ -116,6 +126,7 @@ class FakeAsyncSession:
 
     async def refresh(self, obj: Any) -> None:
         pass
+
 
     async def get(self, entity_cls: Any, ident: Any) -> Optional[Any]:
         if entity_cls is Task:
@@ -202,7 +213,18 @@ class FakeAsyncSession:
                 filtered = [n for n in filtered if n.workspace_id == target_ws]
             return MockScalarResult(filtered)
 
+        # Handle Attachment queries
+        if "from attachments" in sql:
+            filtered = list(self.db.attachments.values())
+            if target_id:
+                filtered = [a for a in filtered if a.id == target_id or a.task_id == target_id]
+            if target_ws:
+                filtered = [a for a in filtered if a.workspace_id == target_ws]
+            return MockScalarResult(filtered)
+
+
         return MockScalarResult([])
+
 
 
 # Global shared in-memory test DB instance

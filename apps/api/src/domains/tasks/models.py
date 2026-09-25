@@ -111,6 +111,12 @@ class Task(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
         back_populates="parent",
         cascade="all, delete-orphan",
     )
+    attachments: Mapped[List["Attachment"]] = relationship(
+        "Attachment",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -133,3 +139,29 @@ class Task(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
             postgresql_where=text("status NOT IN ('done','archived','cancelled')"),
         ),
     )
+
+
+class Attachment(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
+    """File attachment linked to a task or project with multi-tenant isolation."""
+
+    __tablename__ = "attachments"
+
+    task_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    project_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    filename: Mapped[str] = mapped_column(Text, nullable=False)
+    stored_filename: Mapped[str] = mapped_column(Text, nullable=False)
+    file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    content_type: Mapped[str] = mapped_column(Text, nullable=False)
+
+    task: Mapped[Optional["Task"]] = relationship("Task", back_populates="attachments")
+
