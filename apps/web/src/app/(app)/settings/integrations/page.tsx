@@ -10,6 +10,7 @@ import {
 import { apiRequest, API_BASE_URL } from '@/lib/api-client';
 import { formatDateShort } from '@/lib/utils';
 import Link from 'next/link';
+import { BankAccountReaderCard } from '@/components/domain/integrations/BankAccountReaderCard';
 
 export default function IntegrationsSettingsPage() {
   // GitHub Integration Hooks
@@ -659,6 +660,9 @@ export default function IntegrationsSettingsPage() {
             </div>
           )}
         </div>
+
+        {/* Card 4: read bank notices from the user's own Telegram account */}
+        <BankAccountReaderCard />
       </div>
     </div>
   );

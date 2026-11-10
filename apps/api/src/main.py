@@ -32,6 +32,7 @@ from src.integrations.github.router import router as github_router
 from src.integrations.google_calendar.router import router as google_router
 from src.integrations.telegram.router import (
     integrations_telegram_router,
+    telegram_account_router,
     router as telegram_router,
 )
 from src.shared.exceptions import DomainError, domain_error_handler
@@ -82,6 +83,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as ex:
         logger.warning("Failed to start public URL watcher: %s", ex)
 
+    # 4b. Bank notices read from users' own Telegram accounts (opt-in)
+    try:
+        from src.integrations.telegram.bank_listener import bank_listener_manager
+        await bank_listener_manager.start()
+    except Exception as ex:
+        logger.warning("Failed to start bank listener: %s", ex)
+
     # 5. Start Telegram background poller (for local/dev environments)
     try:
         from src.integrations.telegram.poller import telegram_poller
@@ -96,6 +104,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         from src.integrations.telegram.reminders import reminder_dispatcher
         await reminder_dispatcher.stop()
+        from src.integrations.telegram.bank_listener import bank_listener_manager
+        await bank_listener_manager.stop()
         from src.integrations.telegram.public_url import public_url_watcher
         if public_url_watcher is not None:
             await public_url_watcher.stop()
@@ -212,6 +222,7 @@ def create_app() -> FastAPI:
     app.include_router(google_router, prefix=v1_prefix)
     app.include_router(github_router, prefix=v1_prefix)
     app.include_router(integrations_telegram_router, prefix=v1_prefix)
+    app.include_router(telegram_account_router, prefix=v1_prefix)
     app.include_router(telegram_router, prefix=v1_prefix)
     app.include_router(telegram_router)  # Support root webhook URLs from Telegram Bot API
     app.include_router(ws_router, prefix=v1_prefix)

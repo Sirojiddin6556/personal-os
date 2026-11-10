@@ -45,10 +45,19 @@ def _tg():
     return handler
 
 
+def fingerprint_raw(provider: str, stamp: Any, text: str) -> str:
+    """Same notice -> same key, whether it was forwarded or read from the account.
+
+    ``stamp`` is the unix time of the original bank message (forward_origin.date
+    for forwards, message.date for the account listener).
+    """
+    return hashlib.sha256(f"{provider}|{stamp}|{text.strip()}".encode("utf-8")).hexdigest()
+
+
 def fingerprint(provider: str, message: Dict[str, Any], text: str) -> str:
     origin = message.get("forward_origin") or {}
     stamp = origin.get("date") or message.get("forward_date") or ""
-    return hashlib.sha256(f"{provider}|{stamp}|{text.strip()}".encode("utf-8")).hexdigest()
+    return fingerprint_raw(provider, stamp, text)
 
 
 def _money(minor: int) -> str:
@@ -100,25 +109,41 @@ async def _accounts(s: AsyncSession, workspace_id: UUID, currency: str) -> List[
 async def handle_forward(
     s: AsyncSession, workspace_id: UUID, chat_id: Any, message: Dict[str, Any], provider: str, text: str
 ) -> None:
-    tg = _tg()
     received = forwarded_at(message) or datetime.now(timezone.utc)
+    await ingest(s, workspace_id, chat_id, provider, text, received, fingerprint(provider, message, text))
+
+
+async def ingest(
+    s: AsyncSession,
+    workspace_id: UUID,
+    chat_id: Any,
+    provider: str,
+    text: str,
+    received: datetime,
+    fp: str,
+    quiet: bool = False,
+) -> Optional[BankNotice]:
+    """Parse, deduplicate and route one bank notice. ``quiet``: the account listener
+    stays silent about skipped/duplicate messages (balances, promos, re-reads)."""
+    tg = _tg()
     parsed = PARSERS[provider](text, received)
     if parsed is None:
-        await tg.send_message(
-            chat_id,
-            "Это уведомление я пропустил: в нём нет одной понятной суммы оплаты или поступления "
-            "(остатки, отказы и реклама не записываются).",
-        )
-        return
+        if not quiet:
+            await tg.send_message(
+                chat_id,
+                "Это уведомление я пропустил: в нём нет одной понятной суммы оплаты или поступления "
+                "(остатки, отказы и реклама не записываются).",
+            )
+        return None
 
-    fp = fingerprint(provider, message, text)
     existing = (
         await s.execute(select(BankNotice).where(BankNotice.workspace_id == workspace_id, BankNotice.fingerprint == fp))
     ).scalar_one_or_none()
     if existing is not None:
-        state = {"posted": "уже записано", "ignored": "вы его пропустили", "pending": "ждёт выбора выше"}
-        await tg.send_message(chat_id, f"Это уведомление уже было: {state.get(existing.status, existing.status)}.")
-        return
+        if not quiet:
+            state = {"posted": "уже записано", "ignored": "вы его пропустили", "pending": "ждёт выбора выше"}
+            await tg.send_message(chat_id, f"Это уведомление уже было: {state.get(existing.status, existing.status)}.")
+        return None
 
     accounts = await _accounts(s, workspace_id, parsed.currency)
     account = next((a for a in accounts if parsed.card_last4 and a.card_last4 == parsed.card_last4), None)
@@ -144,6 +169,7 @@ async def handle_forward(
     else:
         await _offer_category(s, workspace_id, notice, account, chat_id, None)
     await s.commit()
+    return notice
 
 
 async def _ask_account(
