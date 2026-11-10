@@ -417,3 +417,105 @@ async def disconnect_telegram(
         await session.commit()
 
     return {"status": "disconnected"}
+
+
+# ---------------------------------------------------------------------------
+# Optional: read bank notices from the user's own Telegram account
+# ---------------------------------------------------------------------------
+class AccountStartRequest(BaseModel):
+    api_id: int = Field(gt=0)
+    api_hash: str = Field(min_length=32, max_length=32)
+    phone: str = Field(min_length=9, max_length=20)
+
+
+class AccountCodeRequest(BaseModel):
+    code: str = Field(min_length=4, max_length=12)
+
+
+class AccountPasswordRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+
+
+telegram_account_router = APIRouter(prefix="/integrations/telegram-account", tags=["telegram-account"])
+
+
+def _login_error(ex: Exception) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ex))
+
+
+@telegram_account_router.get("/status")
+async def telegram_account_status(
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> Dict[str, Any]:
+    from src.integrations.telegram import user_account
+
+    return user_account.status_of(await user_account.get_integration(session, workspace.id))
+
+
+@telegram_account_router.post("/start")
+async def telegram_account_start(
+    body: AccountStartRequest,
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> Dict[str, Any]:
+    """Send a login code to the user's Telegram (step 1)."""
+    from src.integrations.telegram import user_account
+
+    bot = (
+        await session.execute(
+            select(Integration).where(
+                Integration.workspace_id == workspace.id,
+                Integration.provider == "telegram",
+                Integration.status == "connected",
+            )
+        )
+    ).scalars().first()
+    if bot is None or not (bot.config or {}).get("chat_id"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Сначала подключите своего бота и привяжите чат — в нём бот будет спрашивать категории.",
+        )
+    try:
+        return await user_account.start_login(session, workspace.id, body.api_id, body.api_hash, body.phone)
+    except user_account.LoginError as ex:
+        raise _login_error(ex)
+
+
+@telegram_account_router.post("/code")
+async def telegram_account_code(
+    body: AccountCodeRequest,
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> Dict[str, Any]:
+    from src.integrations.telegram import user_account
+
+    try:
+        return await user_account.submit_code(session, workspace.id, body.code)
+    except user_account.LoginError as ex:
+        raise _login_error(ex)
+
+
+@telegram_account_router.post("/password")
+async def telegram_account_password(
+    body: AccountPasswordRequest,
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> Dict[str, Any]:
+    from src.integrations.telegram import user_account
+
+    try:
+        return await user_account.submit_password(session, workspace.id, body.password)
+    except user_account.LoginError as ex:
+        raise _login_error(ex)
+
+
+@telegram_account_router.delete("")
+async def telegram_account_disconnect(
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+) -> Dict[str, Any]:
+    """End the server's session in the user's account and wipe the stored secrets."""
+    from src.integrations.telegram import user_account
+
+    return await user_account.disconnect(session, workspace.id)
