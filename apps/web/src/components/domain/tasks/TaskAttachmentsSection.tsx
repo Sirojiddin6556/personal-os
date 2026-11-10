@@ -6,7 +6,7 @@ import {
   useUploadTaskAttachment,
   useDeleteAttachment,
 } from '@/hooks/useTasks';
-import { API_BASE_URL } from '@/lib/api-client';
+import { API_BASE_URL, attachmentUrl, openAttachment } from '@/lib/api-client';
 
 function formatFileSize(bytes: number): string {
   if (!bytes) return '0 B';
@@ -107,7 +107,8 @@ export function TaskAttachmentsSection({ taskId }: TaskAttachmentsSectionProps) 
                 </svg>
                 <div className="min-w-0 flex-1">
                   <a
-                    href={`${API_BASE_URL}/attachments/${att.id}/download`}
+                    href={attachmentUrl(att.id)}
+                    onClick={(e) => void openAttachment(e, att.id, att.filename)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="font-medium text-text-primary hover:text-primary truncate block hover:underline"
@@ -123,7 +124,8 @@ export function TaskAttachmentsSection({ taskId }: TaskAttachmentsSectionProps) 
 
               <div className="flex items-center gap-1 shrink-0">
                 <a
-                  href={`${API_BASE_URL}/attachments/${att.id}/download`}
+                  href={attachmentUrl(att.id)}
+                  onClick={(e) => void openAttachment(e, att.id, att.filename)}
                   download={att.filename}
                   className="p-1 text-text-muted hover:text-primary rounded hover:bg-surface-muted transition-colors"
                   title="Скачать файл"

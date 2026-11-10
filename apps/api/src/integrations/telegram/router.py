@@ -14,11 +14,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
-from src.domains.identity.models import Workspace
+from src.domains.identity.models import User, Workspace
 from src.integrations.crypto import crypto_service
 from src.integrations.models import Integration
-from src.integrations.telegram.handler import handle_telegram_update
-from src.shared.deps import get_db_session, get_public_session, get_workspace
+from src.integrations.telegram.handler import (
+    PAIRING_TTL_SECONDS,
+    handle_telegram_update,
+    hash_pairing_code,
+    new_pairing_code,
+)
+from src.shared.deps import get_current_user, get_db_session, get_public_session, get_workspace
 
 logger = logging.getLogger(__name__)
 
@@ -128,11 +133,20 @@ async def telegram_webhook(
             # Duplicate update acknowledged without re-processing
             return {"ok": True}
 
-    # 6. Background task dispatch with workspace binding
+    # 6. Background dispatch. Do NOT bind the bot owner's workspace: the bot is
+    # public, so the workspace is resolved from the chat that was explicitly linked.
+    bot_token: Optional[str] = None
+    enc_hex = (matching_integration.config or {}).get("enc_token")
+    if enc_hex:
+        try:
+            bot_token = crypto_service.decrypt_token(bytes.fromhex(enc_hex))
+        except Exception as ex:
+            logger.warning("Cannot decrypt bot token for webhook %s: %s", webhook_uuid, type(ex).__name__)
     background_tasks.add_task(
         handle_telegram_update,
         update,
-        workspace_id=matching_integration.workspace_id,
+        bot_token=bot_token,
+        integration_id=matching_integration.id,
     )
     return {"ok": True}
 
@@ -282,6 +296,51 @@ async def connect_telegram(
         "mode": mode,
         "webhook_registered": webhook_registered,
         "webhook_url": target_webhook_url if webhook_registered else None,
+    }
+
+
+@integrations_telegram_router.post("/pairing-code")
+async def create_pairing_code(
+    session: AsyncSession = Depends(get_db_session),
+    workspace: Workspace = Depends(get_workspace),
+    user: User = Depends(get_current_user),
+) -> Dict[str, Any]:
+    """One-time code (15 min) that links a Telegram chat to this workspace: send it to the bot."""
+    res = await session.execute(
+        select(Integration).where(
+            Integration.workspace_id == workspace.id,
+            Integration.provider == "telegram",
+        )
+    )
+    integration = res.scalar_one_or_none()
+    if integration is None or integration.status != "connected":
+        if not settings.telegram_bot_token:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Сначала подключите Telegram-бота (токен от @BotFather).",
+            )
+        # Global bot from TELEGRAM_BOT_TOKEN: keep the pairing on a workspace record.
+        if integration is None:
+            integration = Integration(
+                id=uuid4(), workspace_id=workspace.id, provider="telegram", status="connected", config={}
+            )
+            session.add(integration)
+        integration.status = "connected"
+
+    code = new_pairing_code()
+    integration.config = {
+        **(integration.config or {}),
+        "pairing_hash": hash_pairing_code(code),
+        "pairing_expires": int(time.time()) + PAIRING_TTL_SECONDS,
+        "pairing_user_id": str(user.id),
+    }
+    await session.commit()
+
+    username = (integration.config or {}).get("username")
+    return {
+        "pairing_code": code,
+        "expires_in": PAIRING_TTL_SECONDS,
+        "deep_link": f"https://t.me/{username}?start={code}" if username else None,
     }
 
 

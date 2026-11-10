@@ -551,7 +551,7 @@ async def test_handle_telegram_update_prompts_expense_confirmation():
         assert mock_send.called
         sent_text = mock_send.call_args[0][1]
         markup = mock_send.call_args[1].get("reply_markup") or mock_send.call_args[0][2]
-        assert "Расход 450.0 руб." in sent_text
+        assert "Расход 450 сум" in sent_text
         assert markup is not None
         assert "inline_keyboard" in markup
 

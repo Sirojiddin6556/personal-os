@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domains.identity.models import User
 from src.domains.identity.schemas import (
+    GoogleAuthRequest,
     TelegramAuthRequest,
     TelegramAuthResponse,
     TelegramLinkRequest,
@@ -17,6 +18,7 @@ from src.domains.identity.schemas import (
     WorkspaceResponse,
 )
 from src.domains.identity.service import identity_service
+from src.domains.identity.google_auth import login_with_google
 from src.domains.identity.telegram_auth import link_telegram_account, login_with_telegram
 from src.shared.deps import get_current_user, get_public_session
 
@@ -47,6 +49,18 @@ async def login(
     session: AsyncSession = Depends(get_public_session),
 ) -> TokenResponse:
     return await identity_service.authenticate(session, body)
+
+
+@router.post(
+    "/auth/google",
+    response_model=TokenResponse,
+    summary="Sign in with Google (ID token from Google Identity Services)",
+)
+async def login_google(
+    body: GoogleAuthRequest,
+    session: AsyncSession = Depends(get_public_session),
+) -> TokenResponse:
+    return await login_with_google(session, body.credential)
 
 
 @router.post(

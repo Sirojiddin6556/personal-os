@@ -3,7 +3,7 @@
 import React, { useRef, useState } from 'react';
 import { Task, TaskAttachment } from '@/types/domain';
 import { useProjectAttachments, useDeleteAttachment } from '@/hooks/useTasks';
-import { apiRequest } from '@/lib/api-client';
+import { apiRequest, attachmentUrl, openAttachment } from '@/lib/api-client';
 import { useQueryClient } from '@tanstack/react-query';
 import { cn } from '@/lib/utils';
 
@@ -165,7 +165,6 @@ export function ProjectAttachmentsTab({
               const isWord =
                 att.filename.toLowerCase().endsWith('.docx') ||
                 att.filename.toLowerCase().endsWith('.doc');
-              const downloadUrl = `http://localhost:8008/v1/attachments/${att.id}/download`;
 
               return (
                 <div
@@ -188,7 +187,8 @@ export function ProjectAttachmentsTab({
 
                     <div className="min-w-0">
                       <a
-                        href={downloadUrl}
+                        href={attachmentUrl(att.id)}
+                        onClick={(e) => void openAttachment(e, att.id, att.filename)}
                         target="_blank"
                         rel="noopener noreferrer"
                         download={att.filename}
@@ -213,7 +213,8 @@ export function ProjectAttachmentsTab({
 
                   <div className="flex items-center gap-1 shrink-0 ml-2">
                     <a
-                      href={downloadUrl}
+                      href={attachmentUrl(att.id)}
+                      onClick={(e) => void openAttachment(e, att.id, att.filename)}
                       target="_blank"
                       rel="noopener noreferrer"
                       download={att.filename}

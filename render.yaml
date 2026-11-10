@@ -27,6 +27,10 @@ services:
         sync: false
       - key: CORS_ORIGINS
         value: '["https://sirojiddin6556.github.io"]'
+      - key: FRONTEND_URL          # web app on GitHub Pages (OAuth redirects back here)
+        value: https://sirojiddin6556.github.io/personal-os
+      - key: GOOGLE_CLIENT_ID      # Google Cloud -> Credentials -> OAuth client (Web). Enables "Sign in with Google"
+        sync: false
       - key: TELEGRAM_MINIAPP_URL
         value: https://sirojiddin6556.github.io/personal-os/tg/
       - key: DB_POOL_SIZE

@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiRequest, ApiError, ValidationError } from '@/lib/api-client';
+import { GoogleSignInButton, GOOGLE_CLIENT_ID } from '@/components/auth/GoogleSignInButton';
 
 interface LoginResponse {
   access_token: string;
@@ -68,7 +69,11 @@ export default function LoginPage() {
           setGeneralError(err.problem.detail || err.problem.title || `Ошибка входа (${err.status})`);
         }
       } else if (err instanceof Error) {
-        setGeneralError(err.message);
+        setGeneralError(
+          err.message === 'Failed to fetch'
+            ? 'Сервер API недоступен. Если он на бесплатном Render, подождите минуту, пока он проснётся, и попробуйте снова.'
+            : err.message
+        );
       } else {
         setGeneralError('Произошла непредвиденная ошибка при входе.');
       }
@@ -77,34 +82,36 @@ export default function LoginPage() {
     }
   };
 
-  const handleGoogleOAuth = async () => {
+  const handleGoogleCredential = async (credential: string) => {
     setIsOAuthLoading(true);
     setGeneralError(null);
     try {
-      // Retrieve Google OAuth authorization URL from API or fallback
-      const data = await apiRequest<{ auth_url: string }>('GET', '/integrations/google/auth-url');
-      if (data?.auth_url) {
-        window.location.href = data.auth_url;
-      } else {
-        throw new Error('Не удалось получить ссылку для входа через Google.');
-      }
+      const data = await apiRequest<LoginResponse, { credential: string }>('POST', '/auth/google', {
+        body: { credential },
+      });
+      if (!data?.access_token) throw new Error('Ответ сервера не содержит токен авторизации.');
+      handleLoginSuccess(data.access_token);
     } catch (err) {
-      // Do not redirect to /v1 on the Next.js origin: OAuth is served by the
-      // API (usually localhost:8008), while this page runs on localhost:3000.
-      // The old fallback caused a misleading frontend 404 and hid the real
-      // API/configuration error from the user.
-      if (err instanceof Error) {
-        setGeneralError(err.message);
+      if (err instanceof ApiError) {
+        setGeneralError(err.problem.detail || err.problem.title || `Ошибка входа через Google (${err.status})`);
+      } else if (err instanceof Error) {
+        setGeneralError(
+          err.message === 'Failed to fetch'
+            ? 'Сервер API недоступен. Если он на бесплатном Render, подождите минуту, пока он проснётся, и попробуйте снова.'
+            : err.message
+        );
       } else {
-        setGeneralError('Не удалось запустить вход через Google. Проверьте доступность API.');
+        setGeneralError('Не удалось войти через Google.');
       }
     } finally {
       setIsOAuthLoading(false);
     }
   };
 
+  const isDevBuild = process.env.NODE_ENV !== 'production';
+
   const handleDemoLogin = () => {
-    // Fast mock login token for local development / testing
+    // Development only: lets the UI open without an API (see (app)/layout bypass).
     const demoToken = 'demo-jwt-token-' + Date.now();
     localStorage.setItem('personal_os_bypass_auth', 'true');
     handleLoginSuccess(demoToken);
@@ -141,43 +148,21 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* OAuth Buttons */}
-        <div className="space-y-3">
-          <button
-            type="button"
-            onClick={handleGoogleOAuth}
-            disabled={isOAuthLoading}
-            className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-xl border border-border bg-surface-elevated hover:bg-surface-muted text-sm font-medium text-text-primary transition-colors disabled:opacity-60"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24">
-              <path
-                fill="#4285F4"
-                d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.8-2.4 3.64v3.03h3.88c2.27-2.09 3.66-5.17 3.66-9.11z"
-              />
-              <path
-                fill="#34A853"
-                d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.03c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.24v3.13C3.26 21.36 7.33 24 12 24z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.28 14.29c-.25-.72-.38-1.49-.38-2.29s.13-1.57.38-2.29V6.58H1.24C.45 8.14 0 9.97 0 12s.45 3.86 1.24 5.42l4.04-3.13z"
-              />
-              <path
-                fill="#EA4335"
-                d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.24 6.58l4.04 3.13c.95-2.83 3.6-4.96 6.72-4.96z"
-              />
-            </svg>
-            <span>{isOAuthLoading ? 'Подключение...' : 'Войти через Google'}</span>
-          </button>
-
-          <div className="relative flex py-1 items-center">
-            <div className="flex-grow border-t border-border"></div>
-            <span className="flex-shrink mx-3 text-[11px] uppercase tracking-wider text-text-muted">
-              или по email
-            </span>
-            <div className="flex-grow border-t border-border"></div>
+        {/* Sign in with Google (shown only when NEXT_PUBLIC_GOOGLE_CLIENT_ID is set) */}
+        {GOOGLE_CLIENT_ID && (
+          <div className="space-y-3">
+            <div aria-busy={isOAuthLoading} className={isOAuthLoading ? 'opacity-60 pointer-events-none' : undefined}>
+              <GoogleSignInButton onCredential={handleGoogleCredential} onError={setGeneralError} />
+            </div>
+            <div className="relative flex py-1 items-center">
+              <div className="flex-grow border-t border-border"></div>
+              <span className="flex-shrink mx-3 text-[11px] uppercase tracking-wider text-text-muted">
+                или по email
+              </span>
+              <div className="flex-grow border-t border-border"></div>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Credentials Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -268,7 +253,8 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Development / Demo Quick Access */}
+        {/* Development / Demo Quick Access (never in production builds) */}
+        {isDevBuild && (
         <div className="pt-2 border-t border-border flex items-center justify-between text-xs text-text-muted">
           <span>Режим разработки?</span>
           <button
@@ -279,6 +265,7 @@ export default function LoginPage() {
             Быстрый демо-вход →
           </button>
         </div>
+        )}
       </div>
     </div>
   );

@@ -1,0 +1,19 @@
+name: Keep API awake
+
+# Render's free instance sleeps after 15 min without traffic: the bot then answers
+# ~1 min late and reminders fire late. A ping every 10 minutes keeps it awake
+# (one free service is ~744 h/month, within Render's 750 h free limit).
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    if: ${{ vars.API_URL != '' }}
+    steps:
+      - name: Ping /health
+        run: curl -fsS --max-time 90 --retry 2 "${{ vars.API_URL }}/health" -o /dev/null

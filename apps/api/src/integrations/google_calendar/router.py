@@ -1,6 +1,7 @@
 """Google Calendar OAuth2 consent, channel webhook, and synchronization endpoints."""
 
 import base64
+import logging
 import hashlib
 import secrets
 import time
@@ -22,6 +23,8 @@ from src.integrations.crypto import crypto_service, encrypt_token
 from src.domains.identity.models import Workspace
 from src.integrations.models import Integration, OAuthCredential, SyncState, WebhookSubscription
 from src.shared.deps import get_db_session, get_public_session, get_workspace
+logger = logging.getLogger("personal_os.google_calendar")
+
 from src.integrations.google_calendar.sync import (
     full_sync,
     google_calendar_sync,
@@ -228,7 +231,7 @@ async def callback(
             _CONSUMED_STATES.add(state_fingerprint)
     except HTTPException:
         raise
-    except Exception as ex:
+    except Exception:
         if getattr(settings, "environment", "development") in ("production", "staging"):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -270,10 +273,16 @@ async def callback(
 
     # 3. Exchange authorization code for tokens
     try:
-        if code.startswith("mock-") or not client_id:
+        if settings.environment in ("development", "test") and (code.startswith("mock-") or not client_id):
+            # Local/test only: never accept fake codes on a real deployment.
             access_token = f"mock-access-token-{code}"
             refresh_token = f"mock-refresh-token-{code}"
             expires_in = 3600
+        elif not client_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Google OAuth не настроен: задайте GOOGLE_CLIENT_ID и GOOGLE_CLIENT_SECRET.",
+            )
         else:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.post(
@@ -374,7 +383,7 @@ async def callback(
 
     # 6. Schedule full_sync background task
     background_tasks.add_task(run_full_sync, workspace_id)
-    return RedirectResponse(url="http://localhost:3000/settings/integrations?google=connected")
+    return RedirectResponse(url=f"{settings.frontend_url.rstrip('/')}/settings/integrations/?google=connected")
 
 
 @router.post("/webhook")

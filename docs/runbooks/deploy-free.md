@@ -33,10 +33,23 @@
    - мини-приложение: `https://sirojiddin6556.github.io/personal-os/tg/`
    Если адрес другой — поправьте `CORS_ORIGINS` и `TELEGRAM_MINIAPP_URL` в Render.
 
-## 5. Аккаунт и бот
-1. `/docs` → `POST /v1/auth/register` — создать пользователя; `POST /v1/auth/login` — получить токен, нажать Authorize.
-2. `POST /v1/integrations/telegram/connect` с `{"bot_token": "<токен от BotFather>"}`.
-   API проверит токен, поставит webhook на `RENDER_EXTERNAL_URL` и кнопку меню «Открыть» на Mini App.
-3. Открыть бота → кнопка «Открыть» → войти email/паролем один раз — дальше вход через Telegram.
+## 5. Вход через Google (по желанию)
+1. https://console.cloud.google.com → создать проект → **APIs & Services → OAuth consent screen**:
+   тип External, название, email; в режиме Testing добавьте себя в Test users (или опубликуйте приложение).
+2. **Credentials → Create credentials → OAuth client ID → Web application**.
+   Authorized JavaScript origins: `https://sirojiddin6556.github.io` (и `http://localhost:3000` для разработки).
+   Redirect URI для входа не нужен.
+3. Скопируйте Client ID (`…apps.googleusercontent.com`) в два места:
+   - GitHub → Settings → Secrets and variables → Actions → Variables → `GOOGLE_CLIENT_ID`, затем перезапустите Pages-workflow;
+   - Render → Environment → `GOOGLE_CLIENT_ID`.
+   Client ID — публичное значение; секрет клиента для входа не нужен.
+
+## 6. Аккаунт и бот
+1. Войдите на сайт через Google (аккаунт создастся сам) или зарегистрируйтесь в `/docs` → `POST /v1/auth/register`.
+2. Веб → Настройки → Интеграции → Telegram: вставьте токен от @BotFather. API поставит webhook и кнопку «Открыть».
+3. Там же нажмите «Получить код привязки» и отправьте код боту (или откройте ссылку) — чат привязан.
+   Пользователи с паролем могут вместо этого один раз войти email/паролем прямо в мини-приложении.
+4. Workflow «Keep API awake» пингует API каждые 10 минут, чтобы бот отвечал сразу и напоминания приходили вовремя.
+   Он работает, когда задана переменная `API_URL`.
 
 Токен бота не храните в репозитории и переменных Render — он лежит в базе зашифрованным.

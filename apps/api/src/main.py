@@ -64,7 +64,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as ex:
         logger.warning("Failed to start outbox relay: %s", ex)
 
-    # 3. Start Telegram background poller (for local/dev environments)
+    # 3. Deliver due planner reminders to Telegram
+    try:
+        from src.integrations.telegram.reminders import reminder_dispatcher
+        await reminder_dispatcher.start()
+    except Exception as ex:
+        logger.warning("Failed to start reminder dispatcher: %s", ex)
+
+    # 4. Start Telegram background poller (for local/dev environments)
     try:
         from src.integrations.telegram.poller import telegram_poller
         await telegram_poller.start()
@@ -75,6 +82,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown sequence
     logger.info("Shutting down Personal OS API...")
+    try:
+        from src.integrations.telegram.reminders import reminder_dispatcher
+        await reminder_dispatcher.stop()
+    except Exception as ex:
+        logger.warning("Error stopping reminder dispatcher: %s", ex)
     try:
         from src.integrations.telegram.poller import telegram_poller
         await telegram_poller.stop()

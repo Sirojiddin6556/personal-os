@@ -259,7 +259,7 @@ class PlannerService:
             event_type="reminder.created",
             aggregate_type="reminder",
             aggregate_id=reminder.id,
-            payload={
+            data={
                 "id": str(reminder.id),
                 "title": reminder.title,
                 "remind_at": reminder.remind_at.isoformat(),
