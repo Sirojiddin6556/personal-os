@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
 from src.db.session import TENANT_INFO_KEY, async_session_factory, set_tenant_context
+from src.domains.finance import learning
+from src.domains.finance.bank_notices import learnable_merchant, merchant_key, provider_from_forward
 from src.domains.finance.schemas import TransactionCreate
 from src.domains.finance.service import finance_service
 from src.domains.planner.schemas import PlannerReminderCreate
@@ -103,6 +105,23 @@ async def send_message(
     if reply_markup:
         payload["reply_markup"] = reply_markup
     return await _bot_api("sendMessage", payload, bot_token)
+
+
+async def edit_message(
+    chat_id: int | str,
+    message_id: int,
+    text: str,
+    reply_markup: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Replace the text/buttons of a bot message (falls back to a new message)."""
+    payload: Dict[str, Any] = {"chat_id": chat_id, "message_id": message_id, "text": text}
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    try:
+        return await _bot_api("editMessageText", payload)
+    except Exception as ex:  # e.g. message too old to edit
+        logger.info("editMessageText failed (%s); sending a new message", ex)
+        return await send_message(chat_id, text, reply_markup=reply_markup)
 
 
 async def answer_callback(callback_id: str, text: Optional[str] = None) -> None:
@@ -204,6 +223,9 @@ async def record_expense(
     if not accounts:
         return None
     account = next((a for a in accounts if a.account_type == "cash"), accounts[0])
+    resolved = await learning.resolve_category(s, workspace_id, category, "expense")
+    if resolved is not None and learnable_merchant(category):
+        await learning.learn(s, workspace_id, merchant_key(category), "expense", resolved.id)
     tx = await finance_service.post_transaction(
         s,
         workspace_id,
@@ -212,7 +234,8 @@ async def record_expense(
             amount_minor=int(round(amount * 100)),
             currency=account.currency,
             transaction_type="expense",
-            category_name=category,
+            category_id=resolved.id if resolved else None,
+            category_name=None if resolved else category,
             note=f"Telegram: {category}",
         ),
     )
@@ -246,6 +269,15 @@ def parse_reminder(raw: str, now: Optional[datetime] = None) -> Tuple[str, datet
         target = now_local + timedelta(hours=1)
     title = re.sub(r"\s+", " ", text).strip(" ,.:-") or "Напоминание"
     return title[:1].upper() + title[1:], target.astimezone(timezone.utc)
+
+
+def looks_like_bank_notice(text: str) -> bool:
+    """Pasted (not forwarded) card notification: signed amount in UZS plus a card mask."""
+    return bool(
+        re.search(r"^\s*(?:➖|➕)\s*\d", text, re.M)
+        and re.search(r"UZS|сум", text, re.I)
+        and re.search(r"\*{1,}\d{4}", text)
+    )
 
 
 NOT_LINKED_TEXT = (
@@ -416,7 +448,29 @@ async def _handle_update(
         await send_message(chat_id, NOT_LINKED_TEXT)
         return
 
-    # 4. Dispatch intent
+    # 4. Bank notification forwarded from @HumoCardBot / @CardXabarBot
+    provider = provider_from_forward(message) if "edited_message" not in update else None
+    if provider:
+        from src.integrations.telegram import bank_flow
+
+        async def _bank(s: AsyncSession) -> None:
+            await bank_flow.handle_forward(s, workspace_id, chat_id, message, provider, text)
+
+        if session is not None:
+            await _bank(session)
+        else:
+            async with _tenant_session(workspace_id) as s:
+                await _bank(s)
+        return
+    if looks_like_bank_notice(text):
+        await send_message(
+            chat_id,
+            "Похоже на уведомление банка. Перешлите его (кнопка «Переслать») прямо из @HumoCardBot "
+            "или @CardXabarBot — скопированный текст я не записываю, его нельзя проверить.",
+        )
+        return
+
+    # 5. Dispatch intent
     async def _dispatch(s: AsyncSession) -> None:
         intent = await ai_parse_telegram_message(text, workspace_id)
         task = None
@@ -428,7 +482,8 @@ async def _handle_update(
                     chat_id,
                     "👋 Привет! Я ассистент Personal OS.\n\n"
                     "📋 Задачи:\n• Задача: купить билеты\n• Сделать: подготовить презентацию\n\n"
-                    "💳 Расходы:\n• 45000 такси\n• Потратил 120 тыс на обед\n\n"
+                    "💳 Расходы:\n• 45000 такси\n• Потратил 120 тыс на обед\n"
+                    "• Пересылайте сюда уведомления @HumoCardBot и @CardXabarBot — запишу сам\n\n"
                     "⏰ Напоминания:\n• Напомни выпить витамины\n\n"
                     "Всё остальное — в приложении: кнопка «Открыть» внизу.",
                 )
@@ -439,9 +494,17 @@ async def _handle_update(
                 await send_message(chat_id, f"✅ Задача создана: {task.title}")
 
             case "CREATE_EXPENSE":
+                label = str(intent.data["category"])
+                try:  # the category hint is advisory and must never block the prompt
+                    resolved = await learning.resolve_category(s, workspace_id, label, "expense")
+                    hint = resolved.name if resolved and resolved.name.lower() != label.lower() else ""
+                except Exception as ex:
+                    logger.warning("Category hint failed: %s", ex)
+                    hint = ""
+                where = f"«{label}»" + (f" → {hint}" if hint else "")
                 await send_message(
                     chat_id,
-                    f'Расход {format_amount(float(intent.data["amount"]))} сум на «{intent.data["category"]}»?',
+                    f'Расход {format_amount(float(intent.data["amount"]))} сум на {where}?',
                     reply_markup=confirm_keyboard(intent.data),
                 )
 
@@ -500,11 +563,36 @@ async def _handle_callback(
     integration_id: Optional[UUID],
 ) -> None:
     cb_id = callback_query.get("id")
-    chat_id = ((callback_query.get("message") or {}).get("chat") or {}).get("id")
+    cb_message = callback_query.get("message") or {}
+    chat_id = (cb_message.get("chat") or {}).get("id")
     data = callback_query.get("data", "")
     if cb_id:
         await answer_callback(cb_id)
     if not chat_id:
+        return
+
+    if data.startswith("bn:"):
+        if not workspace_id:
+            workspace_id = await get_workspace_by_telegram_chat(chat_id, session=session, integration_id=integration_id)
+        if not workspace_id:
+            await send_message(chat_id, NOT_LINKED_TEXT)
+            return
+        from src.integrations.telegram import bank_flow
+
+        ws_id = workspace_id
+
+        async def _bank(s: AsyncSession) -> None:
+            await bank_flow.handle_callback(s, ws_id, chat_id, cb_message.get("message_id"), data)
+
+        try:
+            if session is not None:
+                await _bank(session)
+            else:
+                async with _tenant_session(ws_id) as s:
+                    await _bank(s)
+        except Exception as ex:
+            logger.exception("Bank notice callback failed: %s", ex)
+            await send_message(chat_id, "Не получилось. Попробуйте ещё раз или запишите операцию в приложении.")
         return
 
     if data == "cancel_expense":

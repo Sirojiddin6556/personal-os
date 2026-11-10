@@ -108,6 +108,10 @@ class Settings(BaseSettings):
     # Timezone for times typed in the bot ("напомни в 19:00")
     default_timezone: str = "Asia/Tashkent"
 
+    # Cloudflare Quick Tunnel metrics (e.g. http://tunnel:2000/quicktunnel). When set, the API
+    # follows the changing *.trycloudflare.com URL and re-points the bots automatically.
+    quick_tunnel_metrics_url: str = ""
+
     # Telegram reminder delivery loop
     reminder_poll_interval_seconds: float = 60.0
 

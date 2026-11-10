@@ -16,6 +16,8 @@ export default function LoginPage() {
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [fullName, setFullName] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -43,6 +45,21 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
+      if (mode === 'register') {
+        // Create the account (and its personal workspace), then log in below.
+        await apiRequest<unknown, { email: string; password: string; full_name: string; timezone: string }>(
+          'POST',
+          '/auth/register',
+          {
+            body: {
+              email: email.trim(),
+              password,
+              full_name: fullName.trim() || email.split('@')[0],
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+            },
+          }
+        );
+      }
       const data = await apiRequest<LoginResponse, { email: string; password: string }>(
         'POST',
         '/auth/login',
@@ -65,6 +82,8 @@ export default function LoginPage() {
         // RFC 9457 general problem details
         if (err.status === 401) {
           setGeneralError('Неверный email или пароль. Попробуйте еще раз.');
+        } else if (err.status === 409) {
+          setGeneralError('Аккаунт с таким email уже есть. Войдите в него.');
         } else {
           setGeneralError(err.problem.detail || err.problem.title || `Ошибка входа (${err.status})`);
         }
@@ -166,6 +185,25 @@ export default function LoginPage() {
 
         {/* Credentials Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
+          {mode === 'register' && (
+            <div className="space-y-1.5">
+              <label htmlFor="full_name" className="block text-xs font-semibold text-text-secondary">
+                Имя
+              </label>
+              <input
+                id="full_name"
+                type="text"
+                required
+                autoComplete="name"
+                maxLength={100}
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                placeholder="Как к вам обращаться"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-muted border border-border text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+              />
+            </div>
+          )}
+
           {/* Email Field */}
           <div className="space-y-1.5">
             <label
@@ -249,9 +287,31 @@ export default function LoginPage() {
             {isLoading ? (
               <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
             ) : null}
-            <span>{isLoading ? 'Вход...' : 'Войти в систему'}</span>
+            <span>
+              {isLoading
+                ? mode === 'register' ? 'Создаём аккаунт...' : 'Вход...'
+                : mode === 'register' ? 'Создать аккаунт' : 'Войти в систему'}
+            </span>
           </button>
+          {mode === 'register' && (
+            <p className="text-[11px] text-text-muted text-center">Пароль — не короче 8 символов.</p>
+          )}
         </form>
+
+        <div className="text-center text-xs text-text-muted">
+          {mode === 'login' ? 'Нет аккаунта?' : 'Уже есть аккаунт?'}{' '}
+          <button
+            type="button"
+            onClick={() => {
+              setMode(mode === 'login' ? 'register' : 'login');
+              setGeneralError(null);
+              setFieldErrors({});
+            }}
+            className="text-primary hover:underline font-semibold"
+          >
+            {mode === 'login' ? 'Зарегистрироваться' : 'Войти'}
+          </button>
+        </div>
 
         {/* Development / Demo Quick Access (never in production builds) */}
         {isDevBuild && (

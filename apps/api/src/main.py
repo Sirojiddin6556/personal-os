@@ -42,6 +42,9 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+# httpx logs every request URL at INFO; Telegram URLs contain the bot token.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 logger = logging.getLogger("personal_os.api")
 
 
@@ -71,7 +74,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as ex:
         logger.warning("Failed to start reminder dispatcher: %s", ex)
 
-    # 4. Start Telegram background poller (for local/dev environments)
+    # 4. Follow a Cloudflare Quick Tunnel URL (self-hosting without a domain)
+    try:
+        from src.integrations.telegram.public_url import public_url_watcher
+        if public_url_watcher is not None:
+            await public_url_watcher.start()
+    except Exception as ex:
+        logger.warning("Failed to start public URL watcher: %s", ex)
+
+    # 5. Start Telegram background poller (for local/dev environments)
     try:
         from src.integrations.telegram.poller import telegram_poller
         await telegram_poller.start()
@@ -85,6 +96,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         from src.integrations.telegram.reminders import reminder_dispatcher
         await reminder_dispatcher.stop()
+        from src.integrations.telegram.public_url import public_url_watcher
+        if public_url_watcher is not None:
+            await public_url_watcher.stop()
     except Exception as ex:
         logger.warning("Error stopping reminder dispatcher: %s", ex)
     try:

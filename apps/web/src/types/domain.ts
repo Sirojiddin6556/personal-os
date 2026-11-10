@@ -320,6 +320,8 @@ export interface Account {
   currency: string;
   /** Whether the account is hidden from active pickers */
   is_archived?: boolean;
+  /** Last 4 digits of the bank card: forwarded HUMO/Uzcard notices are routed by them */
+  card_last4?: string | null;
   /** Creation timestamp (ISO 8601 UTC) */
   created_at?: string;
   /** Last update timestamp (ISO 8601 UTC) */

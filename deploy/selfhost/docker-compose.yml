@@ -1,0 +1,118 @@
+# Self-hosted Personal OS behind a Cloudflare Tunnel.
+#   cd deploy/selfhost && cp .env.example .env  (fill it)  && docker compose up -d --build
+# Nothing listens publicly: the gateway is bound to 127.0.0.1 for local checks,
+# the internet reaches it only through the tunnel (cloudflared service).
+name: personal-os
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: personal_os
+      POSTGRES_USER: personal_os
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U personal_os -d personal_os"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD in .env}", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    networks: [internal]
+
+  api:
+    build:
+      context: ../../apps/api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      RUN_MIGRATIONS: "1"
+      ROOT_PATH: /api
+      DATABASE_URL: postgresql+asyncpg://personal_os:${POSTGRES_PASSWORD}@db:5432/personal_os
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      DB_POOL_SIZE: "5"
+      DB_MAX_OVERFLOW: "5"
+      FRONTEND_URL: ${PUBLIC_URL}
+      CORS_ORIGINS: '["${PUBLIC_URL}"]'
+      TELEGRAM_MINIAPP_URL: ${PUBLIC_URL}/tg/
+      TELEGRAM_WEBHOOK_BASE_URL: ${PUBLIC_URL}/api
+      GOOGLE_REDIRECT_URI: ${PUBLIC_URL}/api/v1/integrations/google/callback
+      # Free Quick Tunnel: follow its changing *.trycloudflare.com URL
+      QUICK_TUNNEL_METRICS_URL: ${QUICK_TUNNEL_METRICS_URL:-http://tunnel:2000/quicktunnel}
+    volumes:
+      - uploads:/app/data
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/health', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 40s
+    networks: [internal]
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/selfhost/Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${GATEWAY_PORT:-18090}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [internal]
+
+  # Free, no account/domain: https://<random>.trycloudflare.com (changes on restart;
+  # the API re-points the bot and posts the new link to the linked chat).
+  tunnel:
+    image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:-2025.11.1}
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 --url http://gateway:80
+    depends_on: [gateway]
+    networks: [internal]
+    profiles: [quick]
+
+  # With your own domain in Cloudflare: named tunnel (stable URL), token in .env.
+  cloudflared:
+    image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:-2025.11.1}
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on: [gateway]
+    networks: [internal]
+    profiles: [tunnel]
+
+volumes:
+  pgdata:
+  redisdata:
+  uploads:
+
+networks:
+  # Project-scoped (<project>_internal): a second copy of the stack (e.g. a
+  # throwaway test run with -p pos-e2e) must never share DNS names like `db`
+  # with production.
+  internal: {}

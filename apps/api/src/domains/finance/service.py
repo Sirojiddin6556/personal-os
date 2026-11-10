@@ -36,6 +36,7 @@ class FinanceService:
             initial_balance_minor=body.initial_balance_minor,
             balance_minor=body.initial_balance_minor,
             is_archived=False,
+            card_last4=body.card_last4,
         )
         session.add(acc)
         await session.commit()
@@ -97,6 +98,8 @@ class FinanceService:
             acc.currency = body.currency
         if body.is_archived is not None:
             acc.is_archived = body.is_archived
+        if body.card_last4 is not None:
+            acc.card_last4 = body.card_last4 or None
 
         await session.commit()
         await session.refresh(acc)

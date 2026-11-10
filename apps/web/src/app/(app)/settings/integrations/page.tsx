@@ -40,6 +40,7 @@ export default function IntegrationsSettingsPage() {
   const [telegramError, setTelegramError] = useState<string | null>(null);
   const [telegramCode, setTelegramCode] = useState<string | null>(null);
   const [telegramDeepLink, setTelegramDeepLink] = useState<string | null>(null);
+  const [telegramLinked, setTelegramLinked] = useState(false);
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
 
   // Load Google & Telegram config on mount
@@ -53,7 +54,7 @@ export default function IntegrationsSettingsPage() {
       })
       .catch(() => {});
 
-    apiRequest<{ status: 'connected' | 'disconnected'; bot?: { username?: string; first_name?: string } }>(
+    apiRequest<{ status: 'connected' | 'disconnected'; bot?: { username?: string; first_name?: string }; linked?: boolean }>(
       'GET',
       '/integrations/telegram/status'
     )
@@ -61,6 +62,7 @@ export default function IntegrationsSettingsPage() {
         if (res?.status === 'connected') {
           setTelegramStatus('connected');
           setTelegramBotInfo(res.bot || null);
+          setTelegramLinked(Boolean(res.linked));
         }
       })
       .catch(() => {});
@@ -169,6 +171,9 @@ export default function IntegrationsSettingsPage() {
         setTelegramStatus('connected');
         setTelegramBotInfo(res.bot || null);
         setTelegramBotToken('');
+        setTelegramLinked(false);
+        // Next step right away: one-tap link that binds this account to the user's chat
+        void handleGenerateTelegramCode();
       }
     } catch (err: any) {
       setTelegramError(err?.message || 'Ошибка подключения Telegram бота. Проверьте токен.');
@@ -547,7 +552,8 @@ export default function IntegrationsSettingsPage() {
           </div>
 
           {telegramStatus === 'connected' && telegramBotInfo ? (
-            <div className="pt-4 border-t border-border flex items-center justify-between">
+            <div className="pt-4 border-t border-border space-y-3">
+            <div className="flex items-center justify-between">
               <div className="text-xs">
                 <div className="font-semibold text-text-primary">
                   {telegramBotInfo.first_name || 'Personal OS Bot'}
@@ -564,6 +570,51 @@ export default function IntegrationsSettingsPage() {
               >
                 Открыть чат с ботом ↗
               </a>
+            </div>
+              {/* Bind the user's own Telegram chat (one-time code / deep link) */}
+              <div className="pt-3 border-t border-border/60 space-y-3">
+                {telegramLinked ? (
+                  <p className="text-xs text-status-success font-medium">
+                    ✅ Ваш Telegram привязан — пишите боту задачи, расходы и напоминания.
+                  </p>
+                ) : (
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-text-muted">
+                      Последний шаг: привяжите свой Telegram, чтобы бот отвечал именно вам.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleGenerateTelegramCode}
+                      disabled={isGeneratingCode}
+                      className="text-xs font-semibold text-primary hover:underline shrink-0"
+                    >
+                      {isGeneratingCode ? 'Генерация...' : telegramCode ? 'Новый код' : 'Получить ссылку →'}
+                    </button>
+                  </div>
+                )}
+                {telegramError && (
+                  <p className="text-xs text-status-error font-medium">⚠️ {telegramError}</p>
+                )}
+                {!telegramLinked && telegramCode && (
+                  <div className="p-3.5 rounded-xl bg-surface-muted border border-primary/20 space-y-2 animate-fade-in">
+                    {telegramDeepLink && (
+                      <a
+                        href={telegramDeepLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full inline-flex justify-center px-4 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-sm font-semibold transition-colors"
+                      >
+                        Открыть бота и привязать ↗
+                      </a>
+                    )}
+                    <div className="text-[11px] text-text-muted text-center">
+                      {telegramDeepLink ? 'Нажмите «Start» в боте. Или отправьте ему код ' : 'Отправьте боту код '}
+                      <span className="font-mono font-bold text-primary tracking-widest">{telegramCode}</span>
+                      {' '}(действует 15 минут).
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <div className="pt-4 border-t border-border space-y-4">
@@ -605,40 +656,6 @@ export default function IntegrationsSettingsPage() {
                 </p>
               </form>
 
-              {/* Option B: Pairing Code for user account */}
-              <div className="pt-3 border-t border-border/60 flex items-center justify-between">
-                <span className="text-xs text-text-muted">Или привяжите свой аккаунт по коду:</span>
-                <button
-                  onClick={handleGenerateTelegramCode}
-                  disabled={isGeneratingCode}
-                  className="text-xs font-semibold text-primary hover:underline"
-                >
-                  {isGeneratingCode ? 'Генерация...' : 'Получить код привязки →'}
-                </button>
-              </div>
-
-              {telegramCode && (
-                <div className="p-3.5 rounded-xl bg-surface-muted border border-primary/20 space-y-2 animate-fade-in">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-text-muted">Ваш код:</span>
-                    <span className="text-base font-mono font-bold text-primary tracking-widest">{telegramCode}</span>
-                  </div>
-                  <div className="text-[11px] text-text-muted">
-                    Отправьте этот код вашему боту в течение 15 минут
-                    {telegramDeepLink ? ' или откройте ссылку:' : '.'}
-                  </div>
-                  {telegramDeepLink && (
-                    <a
-                      href={telegramDeepLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
-                    >
-                      Открыть бота и привязать →
-                    </a>
-                  )}
-                </div>
-              )}
             </div>
           )}
         </div>

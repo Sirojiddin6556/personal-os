@@ -119,7 +119,7 @@ class PlannerService:
         res = await session.execute(stmt)
         habit = res.scalar_one_or_none()
         if not habit:
-            raise NotFoundError("Habit not found")
+            raise NotFoundError(resource="Habit", identifier=habit_id)
 
         log_stmt = select(HabitLog).where(
             HabitLog.workspace_id == workspace_id,
@@ -152,6 +152,8 @@ class PlannerService:
             today_count = habit.target_count
 
         await session.flush()
+        # updated_at has a server-side onupdate: reload it, lazy loading is impossible in async
+        await session.refresh(habit)
 
         return HabitResponse(
             id=habit.id,
@@ -176,7 +178,9 @@ class PlannerService:
         habit_id: UUID,
     ) -> None:
         stmt = delete(Habit).where(Habit.id == habit_id, Habit.workspace_id == workspace_id)
-        await session.execute(stmt)
+        res = await session.execute(stmt)
+        if res.rowcount == 0:
+            raise NotFoundError(resource="Habit", identifier=habit_id)
 
     # -------------------------------------------------------------------------
     # DAILY JOURNAL
@@ -296,9 +300,10 @@ class PlannerService:
         )
         res = await session.execute(stmt)
         reminder = res.scalar_one_or_none()
-        if reminder:
-            reminder.is_dismissed = True
-            await session.flush()
+        if reminder is None:
+            raise NotFoundError(resource="Reminder", identifier=reminder_id)
+        reminder.is_dismissed = True
+        await session.flush()
 
     # -------------------------------------------------------------------------
     # DAILY AGENDA AGGREGATOR

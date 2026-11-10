@@ -5,6 +5,18 @@ import { useUIStore } from '@/stores/ui-store';
 import { useNotifications } from '@/hooks/useNotifications';
 import { formatDateShort, withBase } from '@/lib/utils';
 import Link from 'next/link';
+import { useQuery } from '@tanstack/react-query';
+import { apiRequest } from '@/lib/api-client';
+
+interface Me {
+  email: string;
+  full_name: string;
+}
+
+interface TelegramStatus {
+  status: 'connected' | 'disconnected';
+  bot?: { username?: string };
+}
 
 export function TopHeader() {
   const { openQuickAdd, theme, setTheme } = useUIStore();
@@ -12,6 +24,20 @@ export function TopHeader() {
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const notifRef = useRef<HTMLDivElement | null>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  // Real signed-in user and the user's own bot (nothing hard-coded).
+  const { data: me } = useQuery<Me>({
+    queryKey: ['auth', 'me'],
+    queryFn: () => apiRequest<Me>('GET', '/auth/me'),
+    staleTime: 5 * 60_000,
+  });
+  const { data: tg } = useQuery<TelegramStatus>({
+    queryKey: ['integrations', 'telegram', 'status'],
+    queryFn: () => apiRequest<TelegramStatus>('GET', '/integrations/telegram/status'),
+    staleTime: 5 * 60_000,
+  });
+  const displayName = me?.full_name || me?.email || '';
+  const initial = (displayName.trim()[0] || '?').toUpperCase();
+  const botUsername = tg?.status === 'connected' ? tg.bot?.username : undefined;
   const profileRef = useRef<HTMLDivElement | null>(null);
 
   // Close notifications and profile popovers on click outside
@@ -201,11 +227,10 @@ export function TopHeader() {
             className="flex items-center gap-2 group cursor-pointer focus:outline-hidden"
           >
             <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 via-primary to-purple-600 text-white font-bold text-xs flex items-center justify-center shadow-xs ring-2 ring-transparent group-hover:ring-primary/30 transition-all">
-              S
+              {initial}
             </div>
             <div className="hidden md:flex flex-col text-left">
-              <span className="text-xs font-semibold text-text-primary leading-tight">Siroj</span>
-              <span className="text-[10px] text-text-muted leading-tight">Admin</span>
+              <span className="text-xs font-semibold text-text-primary leading-tight truncate max-w-[10rem]">{displayName}</span>
             </div>
           </button>
 
@@ -213,8 +238,8 @@ export function TopHeader() {
             <div className="absolute right-0 mt-2 w-64 bg-surface border border-border rounded-2xl shadow-xl z-50 p-2 animate-slide-in space-y-1">
               {/* User info banner */}
               <div className="px-3 py-2.5 rounded-xl bg-surface-muted/60 mb-1 border border-border/50">
-                <p className="text-xs font-bold text-text-primary">Siroj</p>
-                <p className="text-[11px] text-text-muted truncate">siroj@personal-os.local</p>
+                <p className="text-xs font-bold text-text-primary truncate">{me?.full_name}</p>
+                <p className="text-[11px] text-text-muted truncate">{me?.email}</p>
                 <div className="mt-1.5 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                   <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400">Система активна</span>
@@ -245,8 +270,9 @@ export function TopHeader() {
                 <span>Ежедневник и привычки</span>
               </Link>
 
+              {botUsername && (
               <a
-                href="https://t.me/personal_os_bot"
+                href={`https://t.me/${botUsername}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => setIsProfileOpen(false)}
@@ -264,6 +290,7 @@ export function TopHeader() {
                   <line x1="10" y1="14" x2="21" y2="3" />
                 </svg>
               </a>
+              )}
 
               <div className="border-t border-border my-1" />
 

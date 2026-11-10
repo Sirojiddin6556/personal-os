@@ -1,0 +1,352 @@
+"""Bank notifications forwarded to the bot: HUMO (@HumoCardBot) and Uzcard (@CardXabarBot).
+
+Flow: parse strictly -> deduplicate by fingerprint -> route to the account bound
+to the card's last four digits (ask once if unknown) -> category: automatic when
+a learned rule is confident, otherwise inline buttons ranked by what the user
+chose before. Every saved notice can be undone (a reversal, the ledger stays
+immutable).
+
+callback_data (<= 64 bytes): ``bn:<notice uuid>:<action>[:<index>]``.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.config import settings
+from src.domains.finance import learning
+from src.domains.finance.bank_notices import (
+    PARSERS,
+    forwarded_at,
+    learnable_merchant,
+    merchant_key,
+)
+from src.domains.finance.models import Account, BankNotice, Category
+from src.domains.finance.schemas import AccountCreate, TransactionCreate
+from src.domains.finance.service import finance_service
+
+logger = logging.getLogger(__name__)
+
+PROVIDER_TITLE = {"humo": "HUMO", "uzcard": "Uzcard"}
+MAX_ACCOUNT_BUTTONS = 6
+
+
+def _tg():
+    # Late import: handler imports this module.
+    from src.integrations.telegram import handler
+
+    return handler
+
+
+def fingerprint(provider: str, message: Dict[str, Any], text: str) -> str:
+    origin = message.get("forward_origin") or {}
+    stamp = origin.get("date") or message.get("forward_date") or ""
+    return hashlib.sha256(f"{provider}|{stamp}|{text.strip()}".encode("utf-8")).hexdigest()
+
+
+def _money(minor: int) -> str:
+    return _tg().format_amount(minor / 100)
+
+
+def _local(dt: datetime) -> str:
+    from zoneinfo import ZoneInfo
+
+    return dt.astimezone(ZoneInfo(settings.default_timezone)).strftime("%d.%m %H:%M")
+
+
+def describe(notice: BankNotice, account: Optional[Account] = None) -> str:
+    sign = "➖" if notice.kind == "expense" else "➕"
+    card = f" *{notice.card_last4}" if notice.card_last4 else ""
+    head = f"💳 {PROVIDER_TITLE.get(notice.provider, notice.provider)}{card}"
+    if account is not None:
+        head += f" → «{account.name}»"
+    body = f"{sign} {_money(notice.amount_minor)} сум"
+    if notice.merchant:
+        body += f" · {notice.merchant}"
+    return f"{head}\n{body}\n🕓 {_local(notice.occurred_at)}"
+
+
+def _btn(text: str, notice: BankNotice, action: str) -> Dict[str, str]:
+    return {"text": text, "callback_data": f"bn:{notice.id}:{action}"}
+
+
+async def _reply(chat_id: Any, message_id: Optional[int], text: str, markup: Optional[Dict[str, Any]] = None) -> None:
+    tg = _tg()
+    if message_id:
+        await tg.edit_message(chat_id, message_id, text, reply_markup=markup)
+    else:
+        await tg.send_message(chat_id, text, reply_markup=markup)
+
+
+async def _accounts(s: AsyncSession, workspace_id: UUID, currency: str) -> List[Account]:
+    res = await s.execute(
+        select(Account)
+        .where(Account.workspace_id == workspace_id, Account.is_archived.is_(False), Account.currency == currency)
+        .order_by(Account.created_at.asc())
+    )
+    return list(res.scalars().all())
+
+
+# ---------------------------------------------------------------------------
+# Incoming forwarded notice
+# ---------------------------------------------------------------------------
+async def handle_forward(
+    s: AsyncSession, workspace_id: UUID, chat_id: Any, message: Dict[str, Any], provider: str, text: str
+) -> None:
+    tg = _tg()
+    received = forwarded_at(message) or datetime.now(timezone.utc)
+    parsed = PARSERS[provider](text, received)
+    if parsed is None:
+        await tg.send_message(
+            chat_id,
+            "Это уведомление я пропустил: в нём нет одной понятной суммы оплаты или поступления "
+            "(остатки, отказы и реклама не записываются).",
+        )
+        return
+
+    fp = fingerprint(provider, message, text)
+    existing = (
+        await s.execute(select(BankNotice).where(BankNotice.workspace_id == workspace_id, BankNotice.fingerprint == fp))
+    ).scalar_one_or_none()
+    if existing is not None:
+        state = {"posted": "уже записано", "ignored": "вы его пропустили", "pending": "ждёт выбора выше"}
+        await tg.send_message(chat_id, f"Это уведомление уже было: {state.get(existing.status, existing.status)}.")
+        return
+
+    accounts = await _accounts(s, workspace_id, parsed.currency)
+    account = next((a for a in accounts if parsed.card_last4 and a.card_last4 == parsed.card_last4), None)
+    notice = BankNotice(
+        workspace_id=workspace_id,
+        fingerprint=fp,
+        provider=parsed.provider,
+        kind=parsed.kind,
+        amount_minor=parsed.amount_minor,
+        currency=parsed.currency,
+        card_last4=parsed.card_last4,
+        merchant=parsed.merchant,
+        occurred_at=parsed.occurred_at,
+        status="pending",
+        account_id=account.id if account else None,
+        options=[],
+    )
+    s.add(notice)
+    await s.flush()
+
+    if account is None:
+        await _ask_account(s, notice, accounts, chat_id, None)
+    else:
+        await _offer_category(s, workspace_id, notice, account, chat_id, None)
+    await s.commit()
+
+
+async def _ask_account(
+    s: AsyncSession, notice: BankNotice, accounts: List[Account], chat_id: Any, message_id: Optional[int]
+) -> None:
+    shown = accounts[:MAX_ACCOUNT_BUTTONS]
+    notice.options = [str(a.id) for a in shown]
+    card = f"*{notice.card_last4}" if notice.card_last4 else "без номера"
+    rows = [[_btn(f"→ {a.name}", notice, f"a:{i}")] for i, a in enumerate(shown)]
+    if notice.card_last4:
+        rows.append([_btn(f"➕ Новый счёт «{PROVIDER_TITLE[notice.provider]} {card}»", notice, "new")])
+    rows.append([_btn("🚫 Не записывать", notice, "x")])
+    await _reply(
+        chat_id,
+        message_id,
+        f"{describe(notice)}\n\nКарта {card} ещё не привязана к счёту. Куда записывать операции по ней?",
+        {"inline_keyboard": rows},
+    )
+
+
+async def _offer_category(
+    s: AsyncSession,
+    workspace_id: UUID,
+    notice: BankNotice,
+    account: Account,
+    chat_id: Any,
+    message_id: Optional[int],
+    allow_auto: bool = True,
+) -> None:
+    cats = await learning.categories_of(s, workspace_id, notice.kind)
+    key = merchant_key(notice.merchant)
+    rule = await learning.get_rule(s, workspace_id, key, notice.kind) if learnable_merchant(notice.merchant) else None
+    learned = next((c for c in cats if rule and c.id == rule.category_id), None)
+
+    if allow_auto and learned is not None and learning.is_auto(rule):
+        await _post(s, workspace_id, notice, account, learned, chat_id, message_id, auto=True)
+        return
+
+    options = learning.ranked_options(cats, notice.merchant, learned.id if learned else None)
+    notice.options = [str(c.id) for c in options]
+    buttons = [_btn(("⭐ " if learned and c.id == learned.id else "") + c.name, notice, f"c:{i}") for i, c in enumerate(options)]
+    rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
+    rows.append([_btn("Без категории", notice, "c:-"), _btn("🚫 Не записывать", notice, "x")])
+
+    hint = "Выберите категорию:"
+    if learned is not None and rule is not None:
+        left = learning.AUTO_AFTER - rule.confirmations
+        hint = f"Обычно это «{learned.name}»." + (
+            f" Ещё {left} подтвержд. — и буду записывать сам." if left > 0 and not rule.auto_disabled else ""
+        )
+    elif not cats:
+        hint = "Категорий пока нет — создайте их в приложении (Финансы), а сейчас можно записать без категории."
+    await _reply(chat_id, message_id, f"{describe(notice, account)}\n\n{hint}", {"inline_keyboard": rows})
+
+
+async def _post(
+    s: AsyncSession,
+    workspace_id: UUID,
+    notice: BankNotice,
+    account: Account,
+    category: Optional[Category],
+    chat_id: Any,
+    message_id: Optional[int],
+    auto: bool = False,
+) -> None:
+    # Human choices train the rule; automatic saves never train themselves.
+    if category is not None and not auto and learnable_merchant(notice.merchant):
+        await learning.learn(s, workspace_id, merchant_key(notice.merchant), notice.kind, category.id)
+    notice.status = "posted"
+    notice.auto_rule = auto
+    note = f"{PROVIDER_TITLE[notice.provider]}: {notice.merchant}" if notice.merchant else PROVIDER_TITLE[notice.provider]
+    # post_transaction commits the notice update together with the ledger entry.
+    tx = await finance_service.post_transaction(
+        s,
+        workspace_id,
+        TransactionCreate(
+            account_id=account.id,
+            amount_minor=notice.amount_minor,
+            currency=notice.currency,
+            transaction_type=notice.kind,
+            category_id=category.id if category else None,
+            note=note,
+            occurred_at=notice.occurred_at,
+        ),
+    )
+    notice.transaction_id = tx.id
+    await s.commit()
+
+    label = f"«{category.name}»" if category else "без категории"
+    rows = [[_btn("↩️ Отменить", notice, "undo")]]
+    if auto:
+        rows[0].append(_btn("✋ Не записывать сам", notice, "noauto"))
+    prefix = "🤖 Записано автоматически" if auto else "✅ Записано"
+    await _reply(chat_id, message_id, f"{describe(notice, account)}\n\n{prefix}: {label}", {"inline_keyboard": rows})
+
+
+# ---------------------------------------------------------------------------
+# Inline buttons
+# ---------------------------------------------------------------------------
+async def handle_callback(
+    s: AsyncSession, workspace_id: UUID, chat_id: Any, message_id: Optional[int], data: str
+) -> None:
+    tg = _tg()
+    parts = data.split(":")
+    if len(parts) < 3:
+        return
+    try:
+        notice_id = UUID(parts[1])
+    except ValueError:
+        return
+    action, arg = parts[2], (parts[3] if len(parts) > 3 else None)
+
+    # Row lock: a double tap must not post twice.
+    notice = (
+        await s.execute(
+            select(BankNotice)
+            .where(BankNotice.id == notice_id, BankNotice.workspace_id == workspace_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if notice is None:
+        await tg.send_message(chat_id, "Уведомление не найдено.")
+        return
+
+    account = await s.get(Account, notice.account_id) if notice.account_id else None
+    if account is not None and account.workspace_id != workspace_id:
+        account = None
+
+    if action == "undo":
+        if notice.status != "posted" or notice.transaction_id is None:
+            return
+        await finance_service.reverse_transaction(s, workspace_id, notice.transaction_id, reason="Отменено в Telegram")
+        notice.status = "pending"
+        notice.transaction_id = None
+        notice.auto_rule = False
+        await s.flush()
+        if account is None:
+            await _ask_account(s, notice, await _accounts(s, workspace_id, notice.currency), chat_id, message_id)
+        else:
+            await _offer_category(s, workspace_id, notice, account, chat_id, message_id, allow_auto=False)
+        await s.commit()
+        return
+
+    if action == "noauto":
+        rule = await learning.get_rule(s, workspace_id, merchant_key(notice.merchant), notice.kind)
+        if rule is not None:
+            rule.auto_disabled = True
+            await s.commit()
+        await tg.send_message(chat_id, f"Хорошо, для «{notice.merchant}» буду спрашивать категорию.")
+        return
+
+    if notice.status != "pending":
+        await tg.send_message(chat_id, "Это уведомление уже обработано.")
+        return
+
+    if action == "x":
+        notice.status = "ignored"
+        await s.commit()
+        await _reply(chat_id, message_id, f"{describe(notice)}\n\n🚫 Не записано.")
+        return
+
+    if action in ("a", "new"):
+        if action == "new":
+            if not notice.card_last4:
+                return
+            account = await finance_service.create_account(
+                s,
+                workspace_id,
+                AccountCreate(
+                    name=f"{PROVIDER_TITLE[notice.provider]} *{notice.card_last4}",
+                    type="checking",
+                    currency=notice.currency,
+                    card_last4=notice.card_last4,
+                ),
+            )
+        else:
+            try:
+                account = await s.get(Account, UUID(notice.options[int(arg or "")]))
+            except (ValueError, IndexError):
+                return
+            if account is None or account.workspace_id != workspace_id or account.is_archived:
+                return
+            # Remember the card so the next notice goes straight to this account.
+            if notice.card_last4 and not account.card_last4:
+                account.card_last4 = notice.card_last4
+        notice.account_id = account.id
+        await s.flush()
+        await _offer_category(s, workspace_id, notice, account, chat_id, message_id)
+        await s.commit()
+        return
+
+    if action == "c":
+        if account is None:
+            await _ask_account(s, notice, await _accounts(s, workspace_id, notice.currency), chat_id, message_id)
+            await s.commit()
+            return
+        category: Optional[Category] = None
+        if arg != "-":
+            try:
+                category = await s.get(Category, UUID(notice.options[int(arg or "")]))
+            except (ValueError, IndexError):
+                return
+            if category is None or category.workspace_id != workspace_id:
+                return
+        await _post(s, workspace_id, notice, account, category, chat_id, message_id)
+        return

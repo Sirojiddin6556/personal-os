@@ -37,6 +37,7 @@ export function AccountManageModal({
   const [name, setName] = useState('');
   const [type, setType] = useState('checking');
   const [currency, setCurrency] = useState('UZS');
+  const [cardLast4, setCardLast4] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -60,6 +61,7 @@ export function AccountManageModal({
       setName(account.name || '');
       setType(account.type || 'checking');
       setCurrency(account.currency || 'UZS');
+      setCardLast4(account.card_last4 || '');
       setActualBalanceInput(String(currentMinor / 100));
       setReconcileReason('');
       setIsDeleting(false);
@@ -83,6 +85,10 @@ export function AccountManageModal({
       setErrorMsg('Укажите название счёта');
       return;
     }
+    if (cardLast4 && !/^[0-9]{4}$/.test(cardLast4)) {
+      setErrorMsg('Последние цифры карты — ровно 4 цифры');
+      return;
+    }
 
     try {
       await updateAccountMutation.mutateAsync({
@@ -91,6 +97,7 @@ export function AccountManageModal({
           name: name.trim(),
           type,
           currency,
+          card_last4: cardLast4,
         },
       });
       setSuccessMsg('Счёт успешно обновлён');
@@ -281,6 +288,24 @@ export function AccountManageModal({
                   <option value="RUB">RUB (₽)</option>
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
+                Последние 4 цифры карты
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                placeholder="не привязана"
+                value={cardLast4}
+                onChange={(e) => setCardLast4(e.target.value.replace(/[^0-9]/g, '').slice(0, 4))}
+                className="w-full text-xs font-mono font-bold px-3 py-2.5 bg-surface-muted border border-border rounded-xl text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <p className="text-[11px] text-text-muted mt-1">
+                Пересланные боту уведомления HUMO / Uzcard по этой карте попадут на этот счёт.
+              </p>
             </div>
 
             {/* Read-Only Balance Info Box */}
