@@ -218,14 +218,20 @@ async def _tenant_session(workspace_id: UUID) -> AsyncIterator[AsyncSession]:
 async def record_expense(
     s: AsyncSession, workspace_id: UUID, amount: float, category: str
 ) -> Optional[Tuple[Any, Any]]:
-    """Post an expense to the cash account (or the first active one). None if there are no accounts."""
+    """Post an expense immediately: cash account (created if missing), automatic category.
+
+    Returns (transaction, account, category name, why).
+    """
+    from src.domains.finance import auto_category
+    from src.domains.finance.schemas import AccountCreate
+
     accounts = [a for a in await finance_service.list_accounts(s, workspace_id) if not a.is_archived]
-    if not accounts:
-        return None
-    account = next((a for a in accounts if a.account_type == "cash"), accounts[0])
-    resolved = await learning.resolve_category(s, workspace_id, category, "expense")
-    if resolved is not None and learnable_merchant(category):
-        await learning.learn(s, workspace_id, merchant_key(category), "expense", resolved.id)
+    account = next((a for a in accounts if a.account_type == "cash"), None)
+    if account is None:
+        account = await finance_service.create_account(
+            s, workspace_id, AccountCreate(name="Наличные", type="cash", currency="UZS")
+        )
+    resolved, why = await auto_category.resolve(s, workspace_id, "expense", category)
     tx = await finance_service.post_transaction(
         s,
         workspace_id,
@@ -234,12 +240,11 @@ async def record_expense(
             amount_minor=int(round(amount * 100)),
             currency=account.currency,
             transaction_type="expense",
-            category_id=resolved.id if resolved else None,
-            category_name=None if resolved else category,
+            category_id=resolved.id,
             note=f"Telegram: {category}",
         ),
     )
-    return tx, account
+    return tx, account, resolved.name, why
 
 
 # Bot users are in Uzbekistan by default; times like "в 19:00" are local.
@@ -494,18 +499,14 @@ async def _handle_update(
                 await send_message(chat_id, f"✅ Задача создана: {task.title}")
 
             case "CREATE_EXPENSE":
+                # Recorded right away, category chosen automatically; one tap to undo.
+                amount = float(intent.data["amount"])
                 label = str(intent.data["category"])
-                try:  # the category hint is advisory and must never block the prompt
-                    resolved = await learning.resolve_category(s, workspace_id, label, "expense")
-                    hint = resolved.name if resolved and resolved.name.lower() != label.lower() else ""
-                except Exception as ex:
-                    logger.warning("Category hint failed: %s", ex)
-                    hint = ""
-                where = f"«{label}»" + (f" → {hint}" if hint else "")
+                tx, account, cat_name, why = await record_expense(s, workspace_id, amount, label)
                 await send_message(
                     chat_id,
-                    f'Расход {format_amount(float(intent.data["amount"]))} сум на {where}?',
-                    reply_markup=confirm_keyboard(intent.data),
+                    f"✅ Записано: {format_amount(amount)} сум · {label} → «{cat_name}» ({why}) · {account.name}",
+                    reply_markup={"inline_keyboard": [[{"text": "↩️ Отменить", "callback_data": f"txu:{tx.id}"}]]},
                 )
 
             case "CREATE_REMINDER":
@@ -598,6 +599,32 @@ async def _handle_callback(
             await send_message(chat_id, "Не получилось. Попробуйте ещё раз или запишите операцию в приложении.")
         return
 
+    if data.startswith("txu:"):
+        if not workspace_id:
+            workspace_id = await get_workspace_by_telegram_chat(chat_id, session=session, integration_id=integration_id)
+        if not workspace_id:
+            await send_message(chat_id, NOT_LINKED_TEXT)
+            return
+        try:
+            tx_id = UUID(data[4:])
+        except ValueError:
+            return
+        ws_id = workspace_id
+
+        async def _undo(s: AsyncSession) -> None:
+            try:
+                await finance_service.reverse_transaction(s, ws_id, tx_id, reason="Отменено в Telegram")
+                await send_message(chat_id, "↩️ Отменено.")
+            except Exception:
+                await send_message(chat_id, "Эта запись уже отменена или не найдена.")
+
+        if session is not None:
+            await _undo(session)
+        else:
+            async with _tenant_session(ws_id) as s:
+                await _undo(s)
+        return
+
     if data == "cancel_expense":
         await send_message(chat_id, "❌ Запись расхода отменена.")
         return
@@ -622,7 +649,7 @@ async def _handle_callback(
         if result is None:
             await send_message(chat_id, "Нет счёта для списания. Создайте счёт в приложении (Финансы) и повторите.")
             return
-        _tx, account = result
+        _tx, account = result[0], result[1]
         await send_message(chat_id, f"✅ Записано: {format_amount(amount)} сум · {category} · {account.name}")
 
     try:
