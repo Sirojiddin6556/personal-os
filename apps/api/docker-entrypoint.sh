@@ -1,0 +1,7 @@
+#!/bin/sh
+set -e
+if [ "${RUN_MIGRATIONS:-0}" = "1" ]; then
+  echo "Applying database migrations..."
+  alembic upgrade head
+fi
+exec uvicorn src.main:app --host 0.0.0.0 --port "${PORT:-8000}" --proxy-headers --forwarded-allow-ips='*'

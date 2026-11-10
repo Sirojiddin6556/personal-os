@@ -1,3 +1,4 @@
+import os
 from typing import List, Union
 
 DEV_SECRET_KEY = "personal-os-dev-super-secret-jwt-key-change-in-production-2026"
@@ -73,7 +74,8 @@ class Settings(BaseSettings):
     google_redirect_uri: str = "http://localhost:8008/v1/integrations/google/callback"
     telegram_bot_token: str = ""
     telegram_webhook_secret: str = ""
-    telegram_webhook_base_url: str = ""
+    # Render sets RENDER_EXTERNAL_URL automatically, so webhooks work without extra config there.
+    telegram_webhook_base_url: str = Field(default_factory=lambda: os.getenv("RENDER_EXTERNAL_URL", ""))
     # Telegram Mini App: max age of signed initData accepted by /auth/telegram
     telegram_init_data_max_age_seconds: int = 60 * 60 * 24
     # Public HTTPS URL of the Mini App (e.g. https://app.personal-os.com/tg/).

@@ -6,7 +6,8 @@ import react from '@vitejs/plugin-react';
 const apiTarget = process.env.VITE_DEV_API ?? 'http://localhost:8008';
 
 export default defineConfig({
-  base: '/tg/',
+  // /tg/ behind our nginx; GitHub Pages builds pass VITE_BASE=/<repo>/
+  base: process.env.VITE_BASE ?? '/tg/',
   plugins: [react()],
   server: {
     port: 5174,

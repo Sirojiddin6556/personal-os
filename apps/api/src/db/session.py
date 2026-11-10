@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from src.config import settings
+from src.db.url import normalize_database_url
 
 DATABASE_URL: str = os.getenv(
     "DATABASE_URL",
@@ -19,8 +20,7 @@ DATABASE_URL: str = os.getenv(
 if not DATABASE_URL:
     DATABASE_URL = settings.database_url
 
-if DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+DATABASE_URL = normalize_database_url(DATABASE_URL)
 
 engine: AsyncEngine = create_async_engine(
     DATABASE_URL,
