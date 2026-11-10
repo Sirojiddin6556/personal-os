@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import React, { Suspense, useState, useEffect, useRef, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { useNote, useUpdateNote, useNoteSearch } from '@/hooks/useNotes';
 import { formatDateShort } from '@/lib/utils';
@@ -20,10 +20,20 @@ const MDEditor = dynamic(
   }
 );
 
+// Route: /notes?id=<uuid>. A query parameter (not /notes/[id]) keeps the app
+// exportable as static files for GitHub Pages.
 export default function NoteDetailPage() {
-  const params = useParams();
+  return (
+    <Suspense fallback={null}>
+      <NoteDetail />
+    </Suspense>
+  );
+}
+
+function NoteDetail() {
+  const searchParams = useSearchParams();
   const router = useRouter();
-  const id = (params?.id as string) || '';
+  const id = searchParams?.get('id') || '';
 
   const { note, isLoading, isError, error } = useNote(id);
   const updateNoteMutation = useUpdateNote(id);
@@ -276,7 +286,7 @@ export default function NoteDetailPage() {
                         + Вставить [[WikiLink]]
                       </button>
                       <Link
-                        href={`/notes/${result.note_id}`}
+                        href={`/notes?id=${result.note_id}`}
                         className="text-text-muted hover:text-text-primary"
                       >
                         Открыть ↗

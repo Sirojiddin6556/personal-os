@@ -138,7 +138,8 @@ def create_app() -> FastAPI:
             async with engine.connect() as conn:
                 await conn.execute(text("SELECT 1"))
         except Exception as ex:
-            checks["database"] = f"error: {ex}"
+            logger.error("Readiness: database check failed: %s", ex)
+            checks["database"] = "error"
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
             return {"status": "not_ready", "checks": checks}
 
@@ -149,8 +150,9 @@ def create_app() -> FastAPI:
             await r.ping()
             await r.aclose()
         except Exception as ex:
+            logger.error("Readiness: redis check failed: %s", ex)
             if settings.environment in ("staging", "production"):
-                checks["redis"] = f"error: {ex}"
+                checks["redis"] = "error"
                 response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
                 return {"status": "not_ready", "checks": checks}
             checks["redis"] = "degraded (dev fallback)"

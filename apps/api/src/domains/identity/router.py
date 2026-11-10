@@ -6,6 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domains.identity.models import User
 from src.domains.identity.schemas import (
+    TelegramAuthRequest,
+    TelegramAuthResponse,
+    TelegramLinkRequest,
     TokenResponse,
     UserLoginRequest,
     UserRegisterRequest,
@@ -14,6 +17,7 @@ from src.domains.identity.schemas import (
     WorkspaceResponse,
 )
 from src.domains.identity.service import identity_service
+from src.domains.identity.telegram_auth import link_telegram_account, login_with_telegram
 from src.shared.deps import get_current_user, get_public_session
 
 router = APIRouter(tags=["identity"])
@@ -43,6 +47,32 @@ async def login(
     session: AsyncSession = Depends(get_public_session),
 ) -> TokenResponse:
     return await identity_service.authenticate(session, body)
+
+
+@router.post(
+    "/auth/telegram",
+    response_model=TelegramAuthResponse,
+    summary="Log in from the Telegram Mini App using signed initData",
+)
+async def login_telegram(
+    body: TelegramAuthRequest,
+    session: AsyncSession = Depends(get_public_session),
+) -> TelegramAuthResponse:
+    return TelegramAuthResponse.model_validate(await login_with_telegram(session, body.init_data))
+
+
+@router.post(
+    "/auth/telegram/link",
+    response_model=TelegramAuthResponse,
+    summary="Link a Telegram account to an existing Personal OS account and log in",
+)
+async def link_telegram(
+    body: TelegramLinkRequest,
+    session: AsyncSession = Depends(get_public_session),
+) -> TelegramAuthResponse:
+    return TelegramAuthResponse.model_validate(
+        await link_telegram_account(session, body.init_data, body.email, body.password)
+    )
 
 
 @router.get(

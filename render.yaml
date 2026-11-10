@@ -1,0 +1,35 @@
+# Render Blueprint: free API instance. Postgres = Neon, Redis = Upstash (both free).
+# Render dashboard → New → Blueprint → pick this repo, then fill the "sync: false" values.
+services:
+  - type: web
+    name: personal-os-api
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: master
+    rootDir: apps/api
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /v1/health
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: RUN_MIGRATIONS
+        value: "1"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: MASTER_ENCRYPTION_KEY
+        generateValue: true
+      - key: DATABASE_URL          # Neon connection string (postgresql://...?sslmode=require)
+        sync: false
+      - key: REDIS_URL             # Upstash: rediss://default:<password>@<host>:6379
+        sync: false
+      - key: CORS_ORIGINS
+        value: '["https://sirojiddin6556.github.io"]'
+      - key: TELEGRAM_MINIAPP_URL
+        value: https://sirojiddin6556.github.io/personal-os/tg/
+      - key: DB_POOL_SIZE
+        value: "5"
+      - key: DB_MAX_OVERFLOW
+        value: "5"

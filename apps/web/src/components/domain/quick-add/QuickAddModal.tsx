@@ -200,7 +200,7 @@ export function QuickAddModal() {
                         key={note.id}
                         type="button"
                         onClick={() => {
-                          router.push(`/notes/${note.id}`);
+                          router.push(`/notes?id=${note.id}`);
                           closeQuickAdd();
                         }}
                         className="w-full text-left p-2 rounded-xl bg-surface-muted/60 hover:bg-surface-muted flex items-center justify-between text-xs transition-colors"

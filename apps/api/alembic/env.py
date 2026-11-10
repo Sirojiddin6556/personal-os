@@ -38,10 +38,9 @@ from src.config import settings
 
 
 def get_url() -> str:
-    url = os.getenv("DATABASE_URL", settings.database_url)
-    if url.startswith("postgresql://"):
-        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    return url
+    from src.db.url import normalize_database_url
+
+    return normalize_database_url(os.getenv("DATABASE_URL") or settings.database_url)
 
 
 def run_migrations_offline() -> None:

@@ -122,12 +122,6 @@ class IdentityService:
         res = await session.execute(stmt)
         user = res.scalar_one_or_none()
 
-        # Fallback alias for default admin/siroj
-        if not user and clean_email in ("admin", "admin@personal-os.com", "siroj", "siroj@personal-os.local"):
-            stmt = select(User).where(User.email == "siroj@personal-os.dev")
-            res = await session.execute(stmt)
-            user = res.scalar_one_or_none()
-
         if not user or not verify_password(data.password, user.password_hash):
             raise UnauthorizedError("Invalid email or password.")
 

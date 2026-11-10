@@ -25,6 +25,8 @@ jobs:
           docker build -t ghcr.io/${{ github.repository }}/web:${{ github.sha }} apps/web/
           docker push ghcr.io/${{ github.repository }}/api:${{ github.sha }}
           docker push ghcr.io/${{ github.repository }}/web:${{ github.sha }}
+          docker build -t ghcr.io/${{ github.repository }}/tg-miniapp:${{ github.sha }} apps/tg-miniapp/
+          docker push ghcr.io/${{ github.repository }}/tg-miniapp:${{ github.sha }}
       - name: Deploy (ssh + docker compose pull + up)
         run: |
           # ssh deploy script placeholder

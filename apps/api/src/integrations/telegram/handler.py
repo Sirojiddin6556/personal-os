@@ -104,13 +104,11 @@ async def get_workspace_by_telegram_chat(
         integrations = res.scalars().all()
 
         for integ in integrations:
-            if str(integ.config.get("chat_id")) == chat_str:
+            cfg = integ.config or {}
+            if str(cfg.get("chat_id")) == chat_str or str(cfg.get("tg_user_id")) == chat_str:
                 return integ.workspace_id
 
-        # If chat_id not explicitly configured yet, fallback to single workspace integration
-        if len(integrations) == 1:
-            return integrations[0].workspace_id
-
+        # No fallback: an unknown chat must link itself first (/start <workspace> or the Mini App).
         return None
 
     if session is not None:

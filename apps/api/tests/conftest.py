@@ -1,5 +1,11 @@
 """Pytest test configuration and fixtures for Personal OS API."""
 
+import os
+
+# Must be set before src.config is imported: the default environment is now
+# "production", which refuses to start with the built-in dev SECRET_KEY.
+os.environ.setdefault("ENVIRONMENT", "test")
+
 from datetime import datetime, timezone
 import json
 from typing import Any, AsyncGenerator, Dict, List, Optional
