@@ -106,6 +106,7 @@ async def start_login(s: AsyncSession, workspace_id: UUID, api_id: int, api_hash
     api_hash = api_hash.strip()
     if not re.fullmatch(r"[0-9a-f]{32}", api_hash):
         raise LoginError("api_hash — 32 символа (цифры и буквы a–f) со страницы my.telegram.org/apps.")
+    await s.commit()  # don't hold a pooled DB connection during slow Telegram calls
     client = make_client("", api_id, api_hash)
     try:
         await client.connect()
@@ -160,6 +161,7 @@ async def submit_code(s: AsyncSession, workspace_id: UUID, code: str) -> Dict[st
     if integ is None or integ.status != "code_sent":
         raise LoginError("Сначала отправьте номер телефона.")
     cfg = integ.config
+    await s.commit()  # release the DB connection while talking to Telegram
     client = make_client(dec(cfg["enc_pending"]) or "", int(cfg["api_id"]), dec(cfg["enc_api_hash"]) or "")
     try:
         await client.connect()
@@ -190,6 +192,7 @@ async def submit_password(s: AsyncSession, workspace_id: UUID, password: str) ->
     if integ is None or integ.status != "password_needed":
         raise LoginError("Сначала введите код из Telegram.")
     cfg = integ.config
+    await s.commit()  # release the DB connection while talking to Telegram
     client = make_client(dec(cfg["enc_pending"]) or "", int(cfg["api_id"]), dec(cfg["enc_api_hash"]) or "")
     try:
         await client.connect()
@@ -209,6 +212,7 @@ async def disconnect(s: AsyncSession, workspace_id: UUID) -> Dict[str, Any]:
     if integ is None:
         return {"status": "disconnected"}
     cfg = integ.config or {}
+    await s.commit()  # release the DB connection while talking to Telegram
     session = dec(cfg.get("enc_session"))
     if session and cfg.get("api_id") and cfg.get("enc_api_hash"):
         client = make_client(session, int(cfg["api_id"]), dec(cfg["enc_api_hash"]) or "")
