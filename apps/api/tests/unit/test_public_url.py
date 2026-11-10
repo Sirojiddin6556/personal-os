@@ -69,6 +69,33 @@ async def test_reconfigure_bot_sets_webhook_menu_and_notifies():
     assert session.commits == 1
 
 
+async def test_failed_webhook_is_retried_next_tick():
+    calls = []
+    integ = SimpleNamespace(id=uuid4(), config={"enc_token": "aa", "webhook_id": "wid", "chat_id": "42"})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        method = request.url.path.rsplit("/", 1)[-1]
+        calls.append(method)
+        if method == "setWebhook":
+            return httpx.Response(400, json={"ok": False, "description": "bad webhook: Failed to resolve host"})
+        return httpx.Response(200, json={"ok": True})
+
+    with patch("src.integrations.crypto.crypto_service.decrypt_token", return_value="123:TOKEN"):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            n = await public_url.reconfigure_bots(_Session([integ]), "https://new.trycloudflare.com", client)
+    assert n == 0
+    assert calls == ["setWebhook"]  # no menu/notification with a dead webhook
+    assert "public_url" not in integ.config  # retried on the next tick
+
+
+def test_httpx_does_not_log_bot_tokens():
+    import logging
+
+    import src.main  # noqa: F401  (configures logging)
+
+    assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+
+
 async def test_already_current_bot_is_skipped():
     calls = []
     integ = SimpleNamespace(id=uuid4(), config={"enc_token": "aa", "public_url": "https://same.trycloudflare.com"})

@@ -85,8 +85,11 @@ async def reconfigure_bots(session: AsyncSession, base: str, client: Optional[ht
                 }
                 if cfg.get("webhook_secret"):
                     hook["secret_token"] = cfg["webhook_secret"]
-                if await _bot_call(client, token, "setWebhook", hook):
-                    cfg.update(webhook_url=hook["url"], webhook_registered=True, mode="webhook")
+                if not await _bot_call(client, token, "setWebhook", hook):
+                    # A fresh trycloudflare hostname may not resolve for Telegram yet:
+                    # leave public_url untouched so the next tick retries.
+                    continue
+                cfg.update(webhook_url=hook["url"], webhook_registered=True, mode="webhook")
 
             await _bot_call(
                 client,
