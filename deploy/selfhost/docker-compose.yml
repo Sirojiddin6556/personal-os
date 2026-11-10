@@ -44,6 +44,7 @@ services:
     environment:
       ENVIRONMENT: production
       RUN_MIGRATIONS: "1"
+      ROOT_PATH: /api
       DATABASE_URL: postgresql+asyncpg://personal_os:${POSTGRES_PASSWORD}@db:5432/personal_os
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       DB_POOL_SIZE: "5"
