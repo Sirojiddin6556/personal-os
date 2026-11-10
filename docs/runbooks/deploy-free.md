@@ -5,7 +5,7 @@
 | API (FastAPI, Docker) | Render, `render.yaml` | засыпает после 15 мин простоя, холодный старт ~1 мин |
 | PostgreSQL 16 + pgvector | Neon | 0,5 ГБ |
 | Redis | Upstash | 10 000 команд/день |
-| Telegram Mini App | GitHub Pages, `.github/workflows/pages.yml` | — |
+| Веб-приложение + Telegram Mini App | GitHub Pages, `.github/workflows/pages.yml` | — |
 
 ## 1. Neon (база)
 1. https://neon.tech → New project, регион Frankfurt (eu-central-1), Postgres 16.
@@ -25,10 +25,12 @@
 
 > `MASTER_ENCRYPTION_KEY` шифрует токен бота в базе — не меняйте его после подключения бота.
 
-## 4. GitHub Pages (Mini App)
+## 4. GitHub Pages (веб + Mini App)
 1. Settings → Pages → Source: **GitHub Actions**.
-2. Settings → Secrets and variables → Actions → Variables → `MINIAPP_API_URL = https://<service>.onrender.com/v1`.
-3. Actions → «Mini App → GitHub Pages» → Run workflow. Адрес: `https://sirojiddin6556.github.io/personal-os/`.
+2. Settings → Secrets and variables → Actions → Variables → `API_URL = https://<service>.onrender.com/v1`.
+3. Actions → «Web + Mini App → GitHub Pages» → Run workflow.
+   - веб-приложение: `https://sirojiddin6556.github.io/personal-os/`
+   - мини-приложение: `https://sirojiddin6556.github.io/personal-os/tg/`
    Если адрес другой — поправьте `CORS_ORIGINS` и `TELEGRAM_MINIAPP_URL` в Render.
 
 ## 5. Аккаунт и бот

@@ -1,5 +1,7 @@
 ﻿'use client';
 
+import { withBase } from '@/lib/utils';
+
 import React, { useEffect } from 'react';
 
 export default function GlobalError({
@@ -32,7 +34,7 @@ export default function GlobalError({
         </button>
         <button
           type="button"
-          onClick={() => (window.location.href = '/today')}
+          onClick={() => (window.location.href = withBase('/today'))}
           className="px-4 py-2 rounded-xl bg-surface border border-border text-text-primary text-xs font-semibold hover:bg-surface-muted transition-colors shadow-2xs"
         >
           На главную

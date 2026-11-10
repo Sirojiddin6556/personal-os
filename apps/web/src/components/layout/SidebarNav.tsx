@@ -3,7 +3,7 @@
 import React from 'react';
 import { usePathname } from 'next/navigation';
 import { useUIStore } from '@/stores/ui-store';
-import { cn } from '@/lib/utils';
+import { cn, withBase } from '@/lib/utils';
 
 import { useProjects } from '@/hooks/useGitHub';
 
@@ -244,7 +244,7 @@ export function SidebarNav() {
               document.cookie = 'personal_os_access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
               window.dispatchEvent(new Event('auth:logout'));
             } catch {}
-            window.location.href = '/login';
+            window.location.href = withBase('/login');
           }}
           title={isSidebarCollapsed ? 'Выйти' : undefined}
           className={cn(

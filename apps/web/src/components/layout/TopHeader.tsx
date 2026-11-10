@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useUIStore } from '@/stores/ui-store';
 import { useNotifications } from '@/hooks/useNotifications';
-import { formatDateShort } from '@/lib/utils';
+import { formatDateShort, withBase } from '@/lib/utils';
 import Link from 'next/link';
 
 export function TopHeader() {
@@ -277,7 +277,7 @@ export function TopHeader() {
                     document.cookie = 'personal_os_access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
                     window.dispatchEvent(new Event('auth:logout'));
                   } catch {}
-                  window.location.href = '/login';
+                  window.location.href = withBase('/login');
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium text-red-500 hover:bg-red-500/10 transition-colors cursor-pointer"
               >

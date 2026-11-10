@@ -28,7 +28,7 @@ services:
       - key: CORS_ORIGINS
         value: '["https://sirojiddin6556.github.io"]'
       - key: TELEGRAM_MINIAPP_URL
-        value: https://sirojiddin6556.github.io/personal-os/
+        value: https://sirojiddin6556.github.io/personal-os/tg/
       - key: DB_POOL_SIZE
         value: "5"
       - key: DB_MAX_OVERFLOW

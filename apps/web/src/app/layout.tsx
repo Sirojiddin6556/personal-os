@@ -3,11 +3,12 @@ import { QueryProvider } from '@/components/providers/QueryProvider';
 import { WebSocketProvider } from '@/components/providers/WebSocketProvider';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import '@/styles/globals.css';
+import { BASE_PATH } from '@/lib/utils';
 
 export const metadata: Metadata = {
   title: 'Personal OS | Персональная операционная система',
   description: 'AI-first персональная операционная система для задач, календаря и финансов',
-  manifest: '/manifest.json',
+  manifest: `${BASE_PATH}/manifest.json`,
 };
 
 export const viewport: Viewport = {
@@ -20,7 +21,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ru">
       <head>
-        <link rel="manifest" href="/manifest.json" />
+        <link rel="manifest" href={`${BASE_PATH}/manifest.json`} />
       </head>
       <body>
         <ThemeProvider>
