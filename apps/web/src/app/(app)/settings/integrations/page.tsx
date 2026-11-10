@@ -7,7 +7,7 @@ import {
   useDisconnectGitHub,
   useGitHubStatus,
 } from '@/hooks/useGitHub';
-import { apiRequest } from '@/lib/api-client';
+import { apiRequest, API_BASE_URL } from '@/lib/api-client';
 import { formatDateShort } from '@/lib/utils';
 import Link from 'next/link';
 
@@ -30,7 +30,7 @@ export default function IntegrationsSettingsPage() {
   const [isGoogleConfigured, setIsGoogleConfigured] = useState(false);
   const [isDisconnectingGoogle, setIsDisconnectingGoogle] = useState(false);
   const [copiedRedirect, setCopiedRedirect] = useState(false);
-  const redirectUri = 'http://localhost:8008/v1/integrations/google/callback';
+  const redirectUri = `${API_BASE_URL}/integrations/google/callback`;
 
   // Telegram Bot Integration State
   const [telegramStatus, setTelegramStatus] = useState<'connected' | 'disconnected'>('disconnected');
@@ -39,6 +39,7 @@ export default function IntegrationsSettingsPage() {
   const [isConnectingTelegram, setIsConnectingTelegram] = useState(false);
   const [telegramError, setTelegramError] = useState<string | null>(null);
   const [telegramCode, setTelegramCode] = useState<string | null>(null);
+  const [telegramDeepLink, setTelegramDeepLink] = useState<string | null>(null);
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
 
   // Load Google & Telegram config on mount
@@ -191,12 +192,17 @@ export default function IntegrationsSettingsPage() {
   const handleGenerateTelegramCode = async () => {
     setIsGeneratingCode(true);
     try {
-      const res = await apiRequest<{ pairing_code: string; deep_link?: string }>(
+      setTelegramError(null);
+      // Real one-time code from the API (the old random fallback code did nothing).
+      const res = await apiRequest<{ pairing_code: string; deep_link?: string | null }>(
         'POST',
         '/integrations/telegram/pairing-code'
-      ).catch(() => ({ pairing_code: 'POS-' + Math.floor(100000 + Math.random() * 900000) }));
-
+      );
       setTelegramCode(res.pairing_code);
+      setTelegramDeepLink(res.deep_link ?? null);
+    } catch (err: any) {
+      setTelegramCode(null);
+      setTelegramError(err?.problem?.detail || err?.message || 'Не удалось получить код привязки');
     } finally {
       setIsGeneratingCode(false);
     }
@@ -618,8 +624,19 @@ export default function IntegrationsSettingsPage() {
                     <span className="text-base font-mono font-bold text-primary tracking-widest">{telegramCode}</span>
                   </div>
                   <div className="text-[11px] text-text-muted">
-                    Отправьте команду <code className="px-1 py-0.5 rounded bg-surface border font-mono">/start {telegramCode}</code> вашему боту.
+                    Отправьте этот код вашему боту в течение 15 минут
+                    {telegramDeepLink ? ' или откройте ссылку:' : '.'}
                   </div>
+                  {telegramDeepLink && (
+                    <a
+                      href={telegramDeepLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+                    >
+                      Открыть бота и привязать →
+                    </a>
+                  )}
                 </div>
               )}
             </div>

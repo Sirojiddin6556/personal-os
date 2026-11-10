@@ -40,7 +40,6 @@ async def list_events(
     session: AsyncSession = Depends(get_db_session),
     workspace: Workspace = Depends(get_workspace),
 ) -> List[EventResponse]:
-    from datetime import timedelta
     from_dt = start_date or start or (datetime.now(timezone.utc) - timedelta(days=30))
     to_dt = end_date or end or (datetime.now(timezone.utc) + timedelta(days=60))
     events = await calendar_service.list_events(session, workspace.id, from_dt, to_dt)
@@ -68,7 +67,6 @@ async def list_time_blocks(
     session: AsyncSession = Depends(get_db_session),
     workspace: Workspace = Depends(get_workspace),
 ) -> List[TimeBlockResponse]:
-    from datetime import timedelta
     from_dt = start_date or start or (datetime.now(timezone.utc) - timedelta(days=30))
     to_dt = end_date or end or (datetime.now(timezone.utc) + timedelta(days=60))
     blocks = await calendar_service.list_time_blocks(session, workspace.id, from_dt, to_dt)
@@ -84,7 +82,6 @@ async def get_free_busy(
     session: AsyncSession = Depends(get_db_session),
     workspace: Workspace = Depends(get_workspace),
 ) -> FreeBusyResponse:
-    from datetime import timedelta
     from_dt = start_date or start or (datetime.now(timezone.utc) - timedelta(days=7))
     to_dt = end_date or end or (datetime.now(timezone.utc) + timedelta(days=14))
     return await calendar_service.get_free_busy(session, workspace.id, from_dt, to_dt)

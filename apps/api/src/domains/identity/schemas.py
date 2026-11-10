@@ -20,6 +20,10 @@ class UserLoginRequest(BaseModel):
     password: str = Field(..., min_length=1)
 
 
+class GoogleAuthRequest(BaseModel):
+    credential: str = Field(..., min_length=20, max_length=4096, description="Google Identity Services ID token")
+
+
 class TelegramAuthRequest(BaseModel):
     init_data: str = Field(..., min_length=1, max_length=8192)
 

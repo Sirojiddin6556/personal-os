@@ -57,9 +57,15 @@ export function LoginScreen({ mode, telegramName, busy, error, onSubmit }: Props
           {busy ? 'Проверяю…' : mode === 'link' ? 'Привязать и войти' : 'Войти'}
         </button>
         {mode === 'link' && (
-          <p className="xsmall muted" style={{ margin: 0, textAlign: 'center', lineHeight: 1.4 }}>
-            Мы сохраним только ваш Telegram ID, чтобы узнавать вас при следующем запуске.
-          </p>
+          <>
+            <p className="xsmall muted" style={{ margin: 0, textAlign: 'center', lineHeight: 1.4 }}>
+              Входите через Google? Пароля у вас нет — откройте веб-версию → Настройки → Интеграции → Telegram,
+              получите код и отправьте его боту. Затем откройте приложение снова.
+            </p>
+            <p className="xsmall muted" style={{ margin: 0, textAlign: 'center', lineHeight: 1.4 }}>
+              Мы сохраним только ваш Telegram ID, чтобы узнавать вас при следующем запуске.
+            </p>
+          </>
         )}
       </div>
     </form>

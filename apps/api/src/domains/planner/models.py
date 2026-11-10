@@ -77,3 +77,4 @@ class PlannerReminder(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
     remind_type: Mapped[str] = mapped_column(Text, default="custom", nullable=False)
     related_id: Mapped[Optional[UUID]] = mapped_column(PGUUID(as_uuid=True), nullable=True)
     is_dismissed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)

@@ -20,7 +20,7 @@ import { ProjectAttachmentsTab } from '@/components/domain/projects/ProjectAttac
 import { useUIStore } from '@/stores/ui-store';
 import { Priority, Project, TaskPriority, TaskStatus } from '@/types/domain';
 import { cn, formatDateShort } from '@/lib/utils';
-import { apiRequest } from '@/lib/api-client';
+import { apiRequest, attachmentUrl, openAttachment } from '@/lib/api-client';
 
 export default function ProjectsPage() {
   const { data: projects = [], isLoading: isLoadingProjects, refetch: refetchProjects } = useProjects();
@@ -556,11 +556,11 @@ export default function ProjectsPage() {
                                     {t.attachments.map((att) => (
                                       <a
                                         key={att.id}
-                                        href={`http://localhost:8008/v1/attachments/${att.id}/download`}
+                                        href={attachmentUrl(att.id)}
+                                        onClick={(e) => void openAttachment(e, att.id, att.filename)}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         download={att.filename}
-                                        onClick={(e) => e.stopPropagation()}
                                         className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-surface-muted hover:bg-primary/10 text-text-secondary hover:text-primary border border-border hover:border-primary/40 transition-colors"
                                         title={`Скачать ${att.filename}`}
                                       >

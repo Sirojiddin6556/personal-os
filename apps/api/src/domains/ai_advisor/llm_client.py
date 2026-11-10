@@ -7,6 +7,7 @@ import math
 import random
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import httpx
@@ -356,12 +357,17 @@ class LLMClient:
         if any(w in lower for w in event_keywords) or (" в " in lower and any(d in lower for d in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"])):
             time_match = re.search(r"\b([01]?[0-9]|2[0-3]):[0-5][0-9]\b", text)
             time_str = time_match.group(0) if time_match else "14:00"
+            hour, minute = (int(x) for x in time_str.split(":"))
+            now = datetime.now(timezone.utc)
+            starts = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            if starts <= now:
+                starts += timedelta(days=1)  # time already passed today -> tomorrow
             return {
                 "intent": "CREATE_EVENT",
                 "fields": {
                     "title": text,
-                    "starts_at": f"2026-09-11T{time_str}:00Z",
-                    "ends_at": f"2026-09-11T{int(time_str.split(':')[0])+1:02d}:{time_str.split(':')[1]}:00Z",
+                    "starts_at": starts.isoformat().replace("+00:00", "Z"),
+                    "ends_at": (starts + timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
                 },
                 "confidence": 0.90,
             }
@@ -402,13 +408,17 @@ class LLMClient:
         task_ids = re.findall(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", full_context)
         if task_ids:
             first_task = task_ids[0]
+            # Next full hour from now, 90-minute focus block
+            block_start = (datetime.now(timezone.utc) + timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+            block_end = block_start + timedelta(minutes=90)
+            iso = lambda d: d.isoformat().replace("+00:00", "Z")  # noqa: E731
             tool_calls.append(
                 LLMToolCall(
                     name="move_task",
                     args={
                         "task_id": first_task,
                         "new_status": "scheduled",
-                        "scheduled_at": "2026-09-11T10:00:00Z",
+                        "scheduled_at": iso(block_start),
                     },
                 )
             )
@@ -417,15 +427,15 @@ class LLMClient:
                     name="create_time_block",
                     args={
                         "task_id": first_task,
-                        "start_at": "2026-09-11T10:00:00Z",
-                        "end_at": "2026-09-11T11:30:00Z",
+                        "start_at": iso(block_start),
+                        "end_at": iso(block_end),
                         "label": "Focus Time Block",
                     },
                 )
             )
             explanation = (
-                f"Planned dedicated 90-minute focus block for task {first_task} "
-                "within morning availability window. Rescheduled task to 'scheduled'."
+                f"Planned a 90-minute focus block for task {first_task} "
+                "starting at the next full hour. Rescheduled task to 'scheduled'."
             )
         else:
             explanation = "Evaluated current tasks and schedule. No tasks require immediate rescheduling."

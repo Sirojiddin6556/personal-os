@@ -71,7 +71,15 @@ class Settings(BaseSettings):
     # The local web app uses the host API port 8008. Keep this default aligned
     # with the development environment so OAuth never generates a callback for
     # a different service/port when GOOGLE_REDIRECT_URI is omitted.
-    google_redirect_uri: str = "http://localhost:8008/v1/integrations/google/callback"
+    google_redirect_uri: str = Field(
+        default_factory=lambda: (
+            f"{os.environ['RENDER_EXTERNAL_URL'].rstrip('/')}/v1/integrations/google/callback"
+            if os.getenv("RENDER_EXTERNAL_URL")
+            else "http://localhost:8008/v1/integrations/google/callback"
+        )
+    )
+    # Where the web app lives (used for redirects back from OAuth flows).
+    frontend_url: str = "http://localhost:3000"
     telegram_bot_token: str = ""
     telegram_webhook_secret: str = ""
     # Render sets RENDER_EXTERNAL_URL automatically, so webhooks work without extra config there.
@@ -96,6 +104,12 @@ class Settings(BaseSettings):
     @property
     def is_development(self) -> bool:
         return self.environment == "development"
+
+    # Timezone for times typed in the bot ("напомни в 19:00")
+    default_timezone: str = "Asia/Tashkent"
+
+    # Telegram reminder delivery loop
+    reminder_poll_interval_seconds: float = 60.0
 
     # Outbox relay configuration
     outbox_polling_interval_seconds: float = 2.0

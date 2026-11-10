@@ -155,6 +155,39 @@ function getAuthToken(): string | null {
   return null;
 }
 
+/** Absolute API URL of an attachment (needs the bearer token, see openAttachment). */
+export const attachmentUrl = (id: string) => `${API_BASE_URL}/attachments/${id}/download`;
+
+/**
+ * Download an attachment with the Authorization header.
+ * A plain <a href> cannot send the bearer token, so the API answered 401.
+ */
+export async function openAttachment(
+  e: { preventDefault(): void; stopPropagation(): void },
+  id: string,
+  filename: string
+): Promise<void> {
+  e.preventDefault();
+  e.stopPropagation();
+  const token = getAuthToken();
+  const res = await fetch(attachmentUrl(id), {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    window.alert(`Не удалось скачать файл (${res.status})`);
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 /**
  * Performs a typed HTTP request to the Core REST API.
  *
