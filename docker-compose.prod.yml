@@ -1,4 +1,4 @@
-﻿version: '3.8'
+version: '3.8'
 
 services:
   nginx:
@@ -16,6 +16,7 @@ services:
     depends_on:
       - web
       - api
+      - tg_miniapp
     networks:
       - personal_os_net
     logging:
@@ -44,6 +45,18 @@ services:
         limits:
           cpus: '1.5'
           memory: 1G
+
+  tg_miniapp:
+    image: ghcr.io/sirojiddin6556/personal-os-tg-miniapp:${TAG:-latest}
+    container_name: personal_os_tg_miniapp
+    restart: always
+    networks:
+      - personal_os_net
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
 
   api:
     image: ghcr.io/sirojiddin6556/personal-os-api:${TAG:-latest}

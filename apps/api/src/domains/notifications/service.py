@@ -1,7 +1,7 @@
 """Notifications domain service with live real-time push integration."""
 
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select

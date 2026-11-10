@@ -20,6 +20,36 @@ class UserLoginRequest(BaseModel):
     password: str = Field(..., min_length=1)
 
 
+class TelegramAuthRequest(BaseModel):
+    init_data: str = Field(..., min_length=1, max_length=8192)
+
+
+class TelegramLinkRequest(TelegramAuthRequest):
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class TelegramAuthUser(BaseModel):
+    id: UUID
+    full_name: str
+    timezone: str
+
+
+class TelegramUserInfo(BaseModel):
+    id: int
+    first_name: Optional[str] = None
+    username: Optional[str] = None
+
+
+class TelegramAuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "Bearer"
+    expires_in: int
+    workspace_id: UUID
+    user: TelegramAuthUser
+    telegram_user: TelegramUserInfo
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "Bearer"

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.domains.finance.models import Account, Budget, Category, Transaction
 from src.domains.finance.schemas import (
     AccountCreate,
+    AccountUpdate,
     BudgetCreate,
     CategoryCreate,
     TransactionCreate,

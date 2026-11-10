@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_webhook_secret: str = ""
     telegram_webhook_base_url: str = ""
+    # Telegram Mini App: max age of signed initData accepted by /auth/telegram
+    telegram_init_data_max_age_seconds: int = 60 * 60 * 24
+    # Public HTTPS URL of the Mini App (e.g. https://app.personal-os.com/tg/).
+    # When set, connecting a bot also installs a menu button that opens it.
+    telegram_miniapp_url: str = ""
 
     # Outbox relay configuration
     outbox_polling_interval_seconds: float = 2.0

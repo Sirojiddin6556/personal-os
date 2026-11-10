@@ -217,6 +217,22 @@ async def connect_telegram(
         except Exception as ex:
             logger.warning("Failed to invoke Telegram setWebhook: %s", ex)
 
+    # 4b. Menu button that opens the Telegram Mini App
+    miniapp_button = False
+    miniapp_url = (settings.telegram_miniapp_url or "").strip()
+    if miniapp_url.startswith("https://"):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                mb_resp = await client.post(
+                    f"https://api.telegram.org/bot{token}/setChatMenuButton",
+                    json={"menu_button": {"type": "web_app", "text": "Открыть", "web_app": {"url": miniapp_url}}},
+                )
+                miniapp_button = mb_resp.status_code == 200 and mb_resp.json().get("ok", False)
+                if not miniapp_button:
+                    logger.warning("Telegram setChatMenuButton returned error: %s", mb_resp.text)
+        except Exception as ex:
+            logger.warning("Failed to set Telegram menu button: %s", ex)
+
     mode = "webhook" if webhook_registered else "polling"
     config_data = {
         "bot_id": bot_user.get("id"),
@@ -228,6 +244,7 @@ async def connect_telegram(
         "webhook_url": target_webhook_url if webhook_registered else None,
         "webhook_registered": webhook_registered,
         "mode": mode,
+        "miniapp_menu_button": miniapp_button,
         "enc_token": enc["combined"].hex(),
     }
 
@@ -250,7 +267,9 @@ async def connect_telegram(
         session.add(integration)
     else:
         integration.status = "connected"
-        integration.config = config_data
+        # Keep existing account links (chat / Mini App user) when the bot is re-connected.
+        links = {k: integration.config[k] for k in ("chat_id", "tg_user_id", "user_id") if k in (integration.config or {})}
+        integration.config = {**links, **config_data}
 
     await session.commit()
     return {
