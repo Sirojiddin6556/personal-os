@@ -43,6 +43,7 @@ services:
       context: ../../apps/api
       dockerfile: Dockerfile
     environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       DATABASE_URL: postgresql+asyncpg://personal_os:${POSTGRES_PASSWORD}@postgres/personal_os
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
     depends_on:
@@ -59,6 +60,7 @@ services:
       dockerfile: Dockerfile.worker
     command: celery -A src.worker worker --loglevel=info
     environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       DATABASE_URL: postgresql+asyncpg://personal_os:${POSTGRES_PASSWORD}@postgres/personal_os
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
     depends_on:

@@ -31,7 +31,7 @@ async def authenticate_ws(token: str, workspace_id: Optional[UUID] = None) -> Tu
         if "sub" in payload:
             user_id = UUID(payload["sub"])
     except Exception as ex:
-        if settings.environment != "development":
+        if not settings.is_development:
             logger.warning("WebSocket JWT validation failed: %s", ex)
             raise ValueError("Invalid authentication token")
 
@@ -55,7 +55,7 @@ async def authenticate_ws(token: str, workspace_id: Optional[UUID] = None) -> Tu
                 if row:
                     return user, row[1]
 
-        if settings.environment == "development":
+        if settings.is_development:
             from src.shared.deps import get_or_create_default_user, get_or_create_default_workspace
             user = await get_or_create_default_user(session)
             ws = await get_or_create_default_workspace(session, user)

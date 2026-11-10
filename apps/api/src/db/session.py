@@ -1,7 +1,8 @@
 import os
 import uuid
 from typing import AsyncGenerator
-from sqlalchemy import text
+from sqlalchemy import event, text
+from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -50,10 +51,31 @@ async def set_tenant_context(session: AsyncSession, workspace_id: uuid.UUID | st
     )
 
 
+TENANT_INFO_KEY = "tenant_workspace_id"
+
+
+@event.listens_for(Session, "after_begin")
+def _apply_tenant_context(session: Session, transaction, connection) -> None:
+    """Re-apply the RLS tenant context at the start of EVERY transaction.
+
+    set_config(..., is_local=true) only lives until COMMIT/ROLLBACK. Services call
+    session.commit() and keep using the session, so without this hook every query
+    after the first commit would run with no tenant context.
+    """
+    workspace_id = session.info.get(TENANT_INFO_KEY)
+    if workspace_id:
+        connection.execute(
+            text("SELECT set_config('app.current_workspace_id', :wid, true)"),
+            {"wid": workspace_id},
+        )
+
+
 async def get_session(workspace_id: uuid.UUID) -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency yielding an AsyncSession with tenant RLS context pre-configured."""
     async with async_session_factory() as session:
         try:
+            # Picked up by _apply_tenant_context for this and every later transaction.
+            session.sync_session.info[TENANT_INFO_KEY] = str(uuid.UUID(str(workspace_id)))
             await set_tenant_context(session, workspace_id)
             yield session
         except Exception:

@@ -147,8 +147,8 @@ async def get_current_user(
         except Exception:
             pass
 
-    # Development fallback
-    if settings.environment == "development":
+    # Development-only fallback (ENVIRONMENT=development must be set explicitly)
+    if settings.is_development:
         return await get_or_create_default_user(session)
 
     raise UnauthorizedError("Missing or invalid 'Authorization' Bearer header.")
@@ -159,29 +159,38 @@ async def get_workspace(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_public_session),
 ) -> Workspace:
-    """Resolve active tenant Workspace and verify user membership and active status."""
+    """Resolve the tenant Workspace and verify the user is an active member.
+
+    - X-Workspace-Id given: it must be a workspace the user belongs to (else 403).
+    - Not given: the user's first active workspace.
+    - No workspace at all: auto-provisioned only in development, otherwise 403.
+    """
+    stmt = (
+        select(Workspace)
+        .join(Membership, Membership.workspace_id == Workspace.id)
+        .where(Membership.user_id == user.id, Membership.status == "active")
+    )
     if workspace_id_header:
         try:
             workspace_id = UUID(workspace_id_header)
-            stmt = (
-                select(Membership, Workspace)
-                .join(Workspace, Workspace.id == Membership.workspace_id)
-                .where(
-                    Membership.workspace_id == workspace_id,
-                    Membership.user_id == user.id,
-                    Membership.status == "active",
-                )
-            )
-            res = await session.execute(stmt)
-            record = res.first()
-            if record:
-                _, workspace = record
-                return workspace
         except ValueError:
-            pass
+            raise BadRequestError(
+                detail="X-Workspace-Id must be a UUID.",
+                code="INVALID_WORKSPACE_ID",
+            )
+        res = await session.execute(stmt.where(Workspace.id == workspace_id))
+        workspace = res.scalars().first()
+        if workspace is None:
+            raise ForbiddenError("You are not an active member of this workspace.")
+        return workspace
 
-    # Default to user's first active workspace or auto-provision in development
-    return await get_or_create_default_workspace(session, user)
+    res = await session.execute(stmt.order_by(Membership.created_at).limit(1))
+    workspace = res.scalars().first()
+    if workspace is not None:
+        return workspace
+    if settings.is_development:
+        return await get_or_create_default_workspace(session, user)
+    raise ForbiddenError("User has no active workspace.")
 
 
 async def get_db_session(

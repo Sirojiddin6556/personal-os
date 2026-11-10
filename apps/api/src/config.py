@@ -1,5 +1,8 @@
 from typing import List, Union
-from pydantic import Field, field_validator
+
+DEV_SECRET_KEY = "personal-os-dev-super-secret-jwt-key-change-in-production-2026"
+INSECURE_ENVIRONMENTS = ("development", "test")
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,7 +18,9 @@ class Settings(BaseSettings):
 
     app_name: str = "Personal OS API"
     app_version: str = "1.0.0"
-    environment: str = "development"
+    # Safe default: dev-only conveniences (passwordless fallback user, auto-provisioned
+    # workspace, default secret) are enabled ONLY when ENVIRONMENT=development is set explicitly.
+    environment: str = "production"
     debug: bool = False
     api_v1_prefix: str = "/v1"
 
@@ -31,7 +36,7 @@ class Settings(BaseSettings):
 
     # Security & Auth
     secret_key: str = Field(
-        default="personal-os-dev-super-secret-jwt-key-change-in-production-2026",
+        default=DEV_SECRET_KEY,
         description="HMAC secret key for JWT signing",
     )
     jwt_algorithm: str = "HS256"
@@ -74,6 +79,21 @@ class Settings(BaseSettings):
     # Public HTTPS URL of the Mini App (e.g. https://app.personal-os.com/tg/).
     # When set, connecting a bot also installs a menu button that opens it.
     telegram_miniapp_url: str = ""
+
+    @model_validator(mode="after")
+    def _require_strong_secret(self) -> "Settings":
+        if self.environment not in INSECURE_ENVIRONMENTS and (
+            self.secret_key == DEV_SECRET_KEY or len(self.secret_key) < 32
+        ):
+            raise ValueError(
+                f"SECRET_KEY must be set to a random value of at least 32 characters "
+                f"when ENVIRONMENT={self.environment!r} (e.g. `openssl rand -hex 32`)."
+            )
+        return self
+
+    @property
+    def is_development(self) -> bool:
+        return self.environment == "development"
 
     # Outbox relay configuration
     outbox_polling_interval_seconds: float = 2.0
