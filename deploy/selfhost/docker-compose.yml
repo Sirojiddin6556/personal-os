@@ -112,5 +112,7 @@ volumes:
   uploads:
 
 networks:
-  internal:
-    name: personal-os-internal
+  # Project-scoped (<project>_internal): a second copy of the stack (e.g. a
+  # throwaway test run with -p pos-e2e) must never share DNS names like `db`
+  # with production.
+  internal: {}
