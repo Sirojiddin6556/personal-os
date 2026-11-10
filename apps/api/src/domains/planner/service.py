@@ -152,6 +152,8 @@ class PlannerService:
             today_count = habit.target_count
 
         await session.flush()
+        # updated_at has a server-side onupdate: reload it, lazy loading is impossible in async
+        await session.refresh(habit)
 
         return HabitResponse(
             id=habit.id,
