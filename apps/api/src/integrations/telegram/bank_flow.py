@@ -24,11 +24,13 @@ from src.config import settings
 from src.domains.finance import learning
 from src.domains.finance.bank_notices import (
     PARSERS,
+    CardBalance,
+    parse_balance_summary,
     forwarded_at,
     learnable_merchant,
     merchant_key,
 )
-from src.domains.finance.models import Account, BankNotice, Category
+from src.domains.finance.models import Account, BankNotice, Category, Transaction
 from src.domains.finance.schemas import AccountCreate, TransactionCreate
 from src.domains.finance.service import finance_service
 
@@ -126,6 +128,10 @@ async def ingest(
     """Parse, deduplicate and route one bank notice. ``quiet``: the account listener
     stays silent about skipped/duplicate messages (balances, promos, re-reads)."""
     tg = _tg()
+    balances = parse_balance_summary(text)
+    if balances is not None:
+        await reconcile_summary(s, workspace_id, chat_id, provider, balances, received)
+        return None
     parsed = PARSERS[provider](text, received)
     if parsed is None:
         if not quiet:
@@ -376,3 +382,126 @@ async def handle_callback(
                 return
         await _post(s, workspace_id, notice, account, category, chat_id, message_id)
         return
+
+
+# ---------------------------------------------------------------------------
+# "💳 Общий баланс": compare bank balances with the accounts bound to the cards
+# callback_data: bb:<account uuid>:<amount minor>:<ts base36>   (reconcile)
+#                bc:<last4>:<amount minor>:<ts base36>          (create account)
+# ---------------------------------------------------------------------------
+def _b36(n: int) -> str:
+    digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+    out = ""
+    while True:
+        n, r = divmod(n, 36)
+        out = digits[r] + out
+        if n == 0:
+            return out
+
+
+async def reconcile_summary(
+    s: AsyncSession,
+    workspace_id: UUID,
+    chat_id: Any,
+    provider: str,
+    balances: List[CardBalance],
+    received: datetime,
+) -> None:
+    tg = _tg()
+    ts = _b36(int(received.timestamp()))
+    accounts = await _accounts(s, workspace_id, "UZS")
+    by_card = {a.card_last4: a for a in accounts if a.card_last4}
+    lines: List[str] = []
+    rows: List[List[Dict[str, str]]] = []
+    for cb in balances:
+        bank = f"{cb.bank} " if cb.bank else ""
+        acc = by_card.get(cb.card_last4)
+        if acc is None:
+            lines.append(f"❔ {bank}*{cb.card_last4}: {_money(cb.amount_minor)} сум — карта не привязана к счёту")
+            rows.append([{"text": f"➕ Счёт для *{cb.card_last4}", "callback_data": f"bc:{cb.card_last4}:{cb.amount_minor}:{ts}"}])
+            continue
+        diff = cb.amount_minor - acc.balance_minor
+        if diff == 0:
+            lines.append(f"✅ «{acc.name}»: {_money(cb.amount_minor)} сум — совпадает")
+            continue
+        sign = "+" if diff > 0 else "−"
+        lines.append(
+            f"⚠️ «{acc.name}»: в банке {_money(cb.amount_minor)}, в приложении {_money(acc.balance_minor)} "
+            f"(разница {sign}{_money(abs(diff))} сум)"
+        )
+        rows.append([{"text": f"✅ Сверить «{acc.name}»"[:60], "callback_data": f"bb:{acc.id}:{cb.amount_minor}:{ts}"}])
+    head = f"💳 Сверка балансов ({PROVIDER_TITLE.get(provider, provider)}, {_local(received)})"
+    tail = "\n\n«Сверить» создаст корректирующую запись, чтобы баланс счёта совпал с банком." if any(
+        r[0]["callback_data"].startswith("bb:") for r in rows
+    ) else ""
+    await tg.send_message(chat_id, head + "\n" + "\n".join(lines) + tail, reply_markup={"inline_keyboard": rows} if rows else None)
+
+
+async def _moved_since(s: AsyncSession, workspace_id: UUID, account_id: UUID, since: datetime) -> bool:
+    res = await s.execute(
+        select(Transaction.id)
+        .where(
+            Transaction.workspace_id == workspace_id,
+            (Transaction.account_id == account_id) | (Transaction.destination_account_id == account_id),
+            # bank time, not ingestion time: an older payment recorded later must not block
+            Transaction.occurred_at > since,
+        )
+        .limit(1)
+    )
+    return res.first() is not None
+
+
+async def handle_balance_callback(s: AsyncSession, workspace_id: UUID, chat_id: Any, data: str) -> None:
+    tg = _tg()
+    parts = data.split(":")
+    if len(parts) != 4:
+        return
+    kind, key, amount_raw, ts_raw = parts
+    try:
+        amount = int(amount_raw)
+        since = datetime.fromtimestamp(int(ts_raw, 36), timezone.utc)
+    except ValueError:
+        return
+    if amount < 0:
+        return
+
+    if kind == "bb":
+        try:
+            account = await s.get(Account, UUID(key))
+        except ValueError:
+            return
+        if account is None or account.workspace_id != workspace_id or account.is_archived:
+            await tg.send_message(chat_id, "Счёт не найден.")
+            return
+        if await _moved_since(s, workspace_id, account.id, since):
+            await tg.send_message(
+                chat_id,
+                f"По счёту «{account.name}» были операции после этого сообщения банка — "
+                "запросите баланс в боте банка ещё раз и сверьте по новому сообщению.",
+            )
+            return
+        if account.balance_minor == amount:
+            await tg.send_message(chat_id, f"«{account.name}» уже совпадает с банком: {_money(amount)} сум.")
+            return
+        await finance_service.reconcile_account(
+            s, workspace_id, account.id, amount, reason=f"Сверка с банком ({_local(since)})"
+        )
+        await tg.send_message(chat_id, f"✅ «{account.name}» сверен: {_money(amount)} сум.")
+        return
+
+    if kind == "bc":
+        if not (len(key) == 4 and key.isdigit()):
+            return
+        existing = [a for a in await _accounts(s, workspace_id, "UZS") if a.card_last4 == key]
+        if existing:
+            await tg.send_message(chat_id, f"Карта *{key} уже привязана к «{existing[0].name}».")
+            return
+        account = await finance_service.create_account(
+            s,
+            workspace_id,
+            AccountCreate(name=f"Карта *{key}", type="checking", currency="UZS", initial_balance_minor=amount, card_last4=key),
+        )
+        await tg.send_message(
+            chat_id,
+            f"✅ Создан счёт «{account.name}» с остатком {_money(amount)} сум. Название можно поменять в приложении.",
+        )
