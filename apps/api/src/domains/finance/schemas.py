@@ -12,6 +12,7 @@ class AccountCreate(BaseModel):
     type: str = Field(default="checking", pattern="^(checking|savings|credit_card|cash|investment|crypto)$")
     currency: str = Field(default="UZS", min_length=3, max_length=3)
     initial_balance_minor: int = 0
+    card_last4: Optional[str] = Field(None, pattern=r"^\d{4}$")
 
 
 class AccountUpdate(BaseModel):
@@ -19,6 +20,8 @@ class AccountUpdate(BaseModel):
     type: Optional[str] = Field(None, pattern="^(checking|savings|credit_card|cash|investment|crypto)$")
     currency: Optional[str] = Field(None, min_length=3, max_length=3)
     is_archived: Optional[bool] = None
+    # "" clears the card binding
+    card_last4: Optional[str] = Field(None, pattern=r"^(\d{4})?$")
 
 
 class ReconcileAccountRequest(BaseModel):
@@ -37,6 +40,7 @@ class AccountResponse(BaseModel):
     balance_minor: Optional[int] = None
     account_type: Optional[str] = None
     is_archived: bool
+    card_last4: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

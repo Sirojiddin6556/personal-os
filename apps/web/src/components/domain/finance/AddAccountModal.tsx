@@ -23,6 +23,7 @@ export function AddAccountModal({ isOpen, onClose }: AddAccountModalProps) {
   const [type, setType] = useState('checking');
   const [currency, setCurrency] = useState('UZS');
   const [initialBalance, setInitialBalance] = useState('');
+  const [cardLast4, setCardLast4] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const createAccountMutation = useCreateAccount();
@@ -36,6 +37,11 @@ export function AddAccountModal({ isOpen, onClose }: AddAccountModalProps) {
       return;
     }
 
+    if (cardLast4 && !/^\d{4}$/.test(cardLast4)) {
+      setErrorMsg('Последние цифры карты — ровно 4 цифры');
+      return;
+    }
+
     const balVal = parseFloat(initialBalance.replace(',', '.')) || 0;
     const initial_balance_minor = Math.round(balVal * 100);
 
@@ -45,9 +51,11 @@ export function AddAccountModal({ isOpen, onClose }: AddAccountModalProps) {
         type,
         currency,
         initial_balance_minor,
+        ...(cardLast4 ? { card_last4: cardLast4 } : {}),
       });
       setName('');
       setInitialBalance('');
+      setCardLast4('');
       setErrorMsg(null);
       onClose();
     } catch (err: any) {
@@ -169,6 +177,26 @@ export function AddAccountModal({ isOpen, onClose }: AddAccountModalProps) {
               className="w-full text-xs font-mono font-bold px-3 py-2.5 bg-surface-muted border border-border rounded-xl text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
+
+          {(type === 'checking' || type === 'savings') && (
+            <div>
+              <label className="block text-[11px] font-semibold text-text-secondary uppercase tracking-wider mb-1">
+                Последние 4 цифры карты
+              </label>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={4}
+                placeholder="1234"
+                value={cardLast4}
+                onChange={(e) => setCardLast4(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                className="w-full text-xs font-mono font-bold px-3 py-2.5 bg-surface-muted border border-border rounded-xl text-text-primary focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              <p className="text-[11px] text-text-muted mt-1">
+                Уведомления HUMO / Uzcard, пересланные боту, будут записываться на этот счёт.
+              </p>
+            </div>
+          )}
 
           {errorMsg && (
             <div className="p-2.5 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800 rounded-xl text-rose-600 dark:text-rose-400 text-xs">

@@ -1,7 +1,7 @@
 """SQLAlchemy models for Finance: Accounts, Categories, Immutable Transactions and Budgets."""
 
 from datetime import date, datetime
-from typing import Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from sqlalchemy import (
@@ -10,10 +10,12 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     ForeignKey,
+    Integer,
     String,
     Text,
+    UniqueConstraint,
 )
-from sqlalchemy.dialects.postgresql import TIMESTAMP, UUID as PGUUID
+from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, synonym
 
 from src.db.base import Base, TimestampMixin, UUIDMixin, WorkspaceMixin
@@ -34,6 +36,8 @@ class Account(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
     )  # cash/card/crypto
     initial_balance_minor: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Last four digits of the bank card: bank notifications are routed by them.
+    card_last4: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
 
     # Aliases / Synonyms for backward compatibility
     current_balance_minor = synonym("balance_minor")
@@ -151,3 +155,58 @@ class BudgetPeriod(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date] = mapped_column(Date, nullable=False)
     spent_minor: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+
+
+class BankNotice(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
+    """A bank card notification forwarded to the bot (HUMO / Uzcard).
+
+    ``fingerprint`` makes ingestion idempotent: forwarding the same notice twice
+    never records the payment twice.
+    """
+
+    __tablename__ = "bank_notices"
+
+    fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    amount_minor: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="UZS")
+    card_last4: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
+    merchant: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    occurred_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    account_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
+    )
+    transaction_id: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True
+    )
+    # Ids offered on the inline keyboard (callback_data carries only the index).
+    options: Mapped[List[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    auto_rule: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "fingerprint", name="uq_bank_notices_fingerprint"),
+        CheckConstraint("provider IN ('humo','uzcard')", name="chk_bank_notices_provider"),
+        CheckConstraint("kind IN ('income','expense')", name="chk_bank_notices_kind"),
+        CheckConstraint("status IN ('pending','posted','ignored')", name="chk_bank_notices_status"),
+    )
+
+
+class CategoryRule(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
+    """Learned 'merchant/phrase -> category'; automatic after enough agreeing confirmations."""
+
+    __tablename__ = "category_rules"
+
+    key: Mapped[str] = mapped_column(Text, nullable=False)  # normalized merchant or phrase
+    kind: Mapped[str] = mapped_column(Text, nullable=False)  # income/expense
+    category_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("categories.id", ondelete="CASCADE"), nullable=False
+    )
+    confirmations: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    auto_disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        UniqueConstraint("workspace_id", "key", "kind", name="uq_category_rules_key"),
+        CheckConstraint("kind IN ('income','expense')", name="chk_category_rules_kind"),
+    )

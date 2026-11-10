@@ -49,6 +49,7 @@ export interface CreateAccountInput {
   type: string;
   currency?: string;
   initial_balance_minor?: number;
+  card_last4?: string;
 }
 
 export interface CreateCategoryInput {
@@ -105,6 +106,8 @@ export interface UpdateAccountInput {
   type?: string;
   currency?: string;
   is_archived?: boolean;
+  /** '' clears the card binding */
+  card_last4?: string;
 }
 
 /**

@@ -271,6 +271,9 @@ export default function FinancePage() {
                     <span className="truncate font-semibold text-text-primary group-hover:text-primary transition-colors">
                       {acc.name}
                     </span>
+                    {acc.card_last4 && (
+                      <span className="text-[10px] font-mono text-text-muted shrink-0">*{acc.card_last4}</span>
+                    )}
                   </span>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <span className="text-[10px] font-mono uppercase bg-surface-muted px-1.5 py-0.5 rounded">
