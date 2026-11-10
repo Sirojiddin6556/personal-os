@@ -3,7 +3,7 @@
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import Header, APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domains.finance.schemas import (
@@ -114,10 +114,11 @@ async def list_categories(
 @router.post("/transactions", response_model=TransactionResponse, status_code=status.HTTP_201_CREATED)
 async def post_transaction(
     body: TransactionCreate,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     session: AsyncSession = Depends(get_db_session),
     workspace: Workspace = Depends(get_workspace),
 ) -> TransactionResponse:
-    tx = await finance_service.post_transaction(session, workspace.id, body)
+    tx = await finance_service.post_transaction(session, workspace.id, body, idempotency_key=idempotency_key)
     return TransactionResponse.model_validate(tx)
 
 

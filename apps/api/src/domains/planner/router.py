@@ -48,6 +48,7 @@ async def create_habit(
     workspace: Workspace = Depends(get_workspace),
 ) -> HabitResponse:
     habit = await planner_service.create_habit(session, workspace.id, body)
+    await session.commit()
     return HabitResponse(
         id=habit.id,
         workspace_id=habit.workspace_id,
@@ -72,7 +73,9 @@ async def toggle_habit(
     session: AsyncSession = Depends(get_db_session),
     workspace: Workspace = Depends(get_workspace),
 ) -> HabitResponse:
-    return await planner_service.toggle_habit_completion(session, workspace.id, habit_id, target_date)
+    result = await planner_service.toggle_habit_completion(session, workspace.id, habit_id, target_date)
+    await session.commit()
+    return result
 
 
 @router.delete("/habits/{habit_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a habit")
@@ -82,6 +85,7 @@ async def delete_habit(
     workspace: Workspace = Depends(get_workspace),
 ) -> None:
     await planner_service.delete_habit(session, workspace.id, habit_id)
+    await session.commit()
 
 
 @router.get("/journal", response_model=Optional[DailyJournalResponse], summary="Get daily journal entry for date")
@@ -101,6 +105,7 @@ async def save_journal(
     workspace: Workspace = Depends(get_workspace),
 ) -> DailyJournalResponse:
     entry = await planner_service.save_journal_entry(session, workspace.id, body)
+    await session.commit()
     return DailyJournalResponse.model_validate(entry)
 
 
@@ -120,6 +125,7 @@ async def create_reminder(
     workspace: Workspace = Depends(get_workspace),
 ) -> PlannerReminderResponse:
     reminder = await planner_service.create_reminder(session, workspace.id, body)
+    await session.commit()
     return PlannerReminderResponse.model_validate(reminder)
 
 
@@ -130,3 +136,4 @@ async def dismiss_reminder(
     workspace: Workspace = Depends(get_workspace),
 ) -> None:
     await planner_service.dismiss_reminder(session, workspace.id, reminder_id)
+    await session.commit()

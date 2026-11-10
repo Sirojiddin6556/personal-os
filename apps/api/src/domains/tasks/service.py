@@ -377,12 +377,14 @@ class TaskService:
         workspace_id: UUID,
         task_id: UUID,
     ) -> TaskResponse:
-        """Explicitly transition a task to DONE status."""
+        """Explicitly transition a task to DONE status (no If-Match needed: idempotent intent)."""
+        current = await self.get_by_id(session, workspace_id, task_id)
         return await self.update(
             session=session,
             workspace_id=workspace_id,
             task_id=task_id,
             body=TaskUpdate(status=TaskStatus.DONE.value),
+            version=current.version,
         )
 
     async def add_attachment(
