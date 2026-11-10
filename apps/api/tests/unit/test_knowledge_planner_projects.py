@@ -428,12 +428,15 @@ async def test_dashboard_service_today_and_summary(mock_session):
     assert isinstance(free_wins, list)
 
     # Dashboard Today
-    mock_session.execute.side_effect = [
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),  # events
-        MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))),  # top tasks
-        MagicMock(scalar_one=MagicMock(return_value=0)),  # overdue count
-        MagicMock(one=MagicMock(return_value=(1500000, 3))),  # budget summary
-    ]
+    # get_today issues many queries (events, tasks, overdue, habits, budget, stats);
+    # one result object that answers every accessor keeps the test independent of their order.
+    any_result = MagicMock(
+        scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))),
+        scalar_one=MagicMock(return_value=0),
+        one=MagicMock(return_value=(1500000, 3)),
+    )
+    mock_session.execute.side_effect = None
+    mock_session.execute.return_value = any_result
     today_data = await dashboard_service.get_today(mock_session, ws_id)
     assert today_data.overdue_count == 0
     assert today_data.budget_summary.total_balance_minor == 1500000
