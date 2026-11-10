@@ -53,6 +53,8 @@ services:
       TELEGRAM_MINIAPP_URL: ${PUBLIC_URL}/tg/
       TELEGRAM_WEBHOOK_BASE_URL: ${PUBLIC_URL}/api
       GOOGLE_REDIRECT_URI: ${PUBLIC_URL}/api/v1/integrations/google/callback
+      # Free Quick Tunnel: follow its changing *.trycloudflare.com URL
+      QUICK_TUNNEL_METRICS_URL: ${QUICK_TUNNEL_METRICS_URL:-http://tunnel:2000/quicktunnel}
     volumes:
       - uploads:/app/data
     depends_on:
@@ -82,6 +84,17 @@ services:
         condition: service_healthy
     networks: [internal]
 
+  # Free, no account/domain: https://<random>.trycloudflare.com (changes on restart;
+  # the API re-points the bot and posts the new link to the linked chat).
+  tunnel:
+    image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:-2025.11.1}
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --metrics 0.0.0.0:2000 --url http://gateway:80
+    depends_on: [gateway]
+    networks: [internal]
+    profiles: [quick]
+
+  # With your own domain in Cloudflare: named tunnel (stable URL), token in .env.
   cloudflared:
     image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:-2025.11.1}
     restart: unless-stopped
