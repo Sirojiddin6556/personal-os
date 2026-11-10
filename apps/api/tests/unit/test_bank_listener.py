@@ -116,3 +116,20 @@ def test_status_never_exposes_secrets():
     )
     out = user_account.status_of(integ)
     assert out == {"status": "connected", "phone": "+998…67", "account": "@me", "error": None, "sources": ["humo"]}
+
+
+def test_db_constraints_allow_every_provider_and_status_the_code_writes():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "alembic/versions/0013_integration_providers.py"
+    spec = importlib.util.spec_from_file_location("m0013", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    from src.integrations.github.service import GitHubService
+
+    for provider in ("telegram", "telegram_user", "google_calendar", GitHubService.PROVIDER):
+        assert provider in mod.PROVIDERS
+    for status in ("connected", "disconnected", "error", "code_sent", "password_needed"):
+        assert status in mod.STATUSES
