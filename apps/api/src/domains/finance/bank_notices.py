@@ -224,3 +224,59 @@ def learnable_merchant(merchant: str) -> bool:
         "to", "from", "оплата", "покупка", "карта", "поступление", "зачисление", "uzum",
     }
     return any(len(w) >= 3 and w not in generic for w in re.findall(r"[a-zа-я]+", key))
+
+
+# ---------------------------------------------------------------------------
+# "💳 Общий баланс" summary (CardXabarBot): per-card balances for reconciliation
+# ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class CardBalance:
+    card_last4: str
+    bank: str
+    amount_minor: int
+
+
+def _balance_minor(raw: str) -> int:
+    """Like bank_amount, but a zero balance is valid."""
+    if re.fullmatch(r"\s*0+(?:[.,]0{1,2})?\s*", raw):
+        return 0
+    return bank_amount(raw)
+
+
+def parse_balance_summary(text: str) -> Optional[list]:
+    """Return [CardBalance, ...] for a balance summary, or None when the text is not one.
+
+    Strict: every card block must have a masked card number and exactly one
+    balance, and the listed balances must add up to the total when it is shown.
+    """
+    # Not _clean(): it strips "**" (markdown bold), which would eat the card mask "******".
+    text = text.replace("\\*", "*").replace("__", "").replace("\xa0", " ")
+    if not re.search(r"общий\s+баланс|umumiy\s+balans", text, re.I):
+        return None
+    head, *blocks = re.split(r"(?=💳\s*(?:Карта|Karta|Card)\s*[:：])", text)
+    if not blocks:
+        return None
+    money = re.compile(r"(\d[\d .,]*?)\s*(?:сум|UZS|so[’'ʻ]?m)\b", re.I)
+    total_match = re.search(r"💰\s*" + money.pattern, head, re.I)
+    result = []
+    for block in blocks:
+        card = re.search(r"\d{4,6}\*+(\d{4})(?!\d)", block)
+        amounts = re.findall(r"💸\s*(\d[\d .,]*?)\s*(?:сум|UZS|so[’'ʻ]?m)\b", block, re.I)
+        if not card or len(amounts) != 1:
+            return None
+        bank = re.search(r"🏦\s*(?:Банк|Bank)\s*[:：]\s*([^\n]+)", block, re.I)
+        try:
+            minor = _balance_minor(amounts[0])
+        except ValueError:
+            return None
+        result.append(CardBalance(card[1], (bank[1].strip() if bank else "")[:60], minor))
+    if len({c.card_last4 for c in result}) != len(result):
+        return None  # two cards with the same last digits: ambiguous
+    if total_match:
+        try:
+            total = _balance_minor(total_match[1])
+        except ValueError:
+            return None
+        if total != sum(c.amount_minor for c in result):
+            return None
+    return result

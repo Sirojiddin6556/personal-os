@@ -571,7 +571,7 @@ async def _handle_callback(
     if not chat_id:
         return
 
-    if data.startswith("bn:"):
+    if data.startswith(("bn:", "bb:", "bc:")):
         if not workspace_id:
             workspace_id = await get_workspace_by_telegram_chat(chat_id, session=session, integration_id=integration_id)
         if not workspace_id:
@@ -582,7 +582,10 @@ async def _handle_callback(
         ws_id = workspace_id
 
         async def _bank(s: AsyncSession) -> None:
-            await bank_flow.handle_callback(s, ws_id, chat_id, cb_message.get("message_id"), data)
+            if data.startswith("bn:"):
+                await bank_flow.handle_callback(s, ws_id, chat_id, cb_message.get("message_id"), data)
+            else:
+                await bank_flow.handle_balance_callback(s, ws_id, chat_id, data)
 
         try:
             if session is not None:

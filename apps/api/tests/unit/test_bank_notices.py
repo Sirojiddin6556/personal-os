@@ -176,3 +176,59 @@ def test_auto_threshold():
     assert not learning.is_auto(SimpleNamespace(confirmations=learning.AUTO_AFTER - 1, auto_disabled=False))
     assert not learning.is_auto(SimpleNamespace(confirmations=99, auto_disabled=True))
     assert not learning.is_auto(None)
+
+
+# ---------------------------------------------------------------- balance summary
+from src.domains.finance.bank_notices import CardBalance, parse_balance_summary  # noqa: E402
+
+SUMMARY = (
+    "💳 Общий баланс:\n  \n 💰 1 404 577.70 сум\n\n\n"
+    "💳 Карта: 860006******0338\n🏦 Банк: Xalq Banki\n👤 IVANOV IVAN\n 💸 0.00 сум\n\n"
+    "💳 Карта: 561468******2641\n🏦 Банк: Ipoteka bank\n👤 IVANOV IVAN\n 💸 1 404 577.70 сум\n\n"
+    "💳 Карта: 561468******6041\n🏦 Банк: Kapital Bank\n👤 IVAN IVANOV\n 💸 0.00 сум"
+)
+
+
+def test_balance_summary_parsed():
+    assert parse_balance_summary(SUMMARY) == [
+        CardBalance("0338", "Xalq Banki", 0),
+        CardBalance("2641", "Ipoteka bank", 140457770),
+        CardBalance("6041", "Kapital Bank", 0),
+    ]
+    # never mistaken for a payment
+    assert parse_uzcard(SUMMARY, R) is None and parse_humo(SUMMARY, R) is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        SUMMARY.replace("1 404 577.70 сум\n\n\n", "1 500 000.00 сум\n\n\n"),  # total disagrees
+        SUMMARY.replace("******6041", "******2641"),  # duplicate card
+        SUMMARY.replace(" 💸 0.00 сум\n\n💳 Карта: 561468", "\n\n💳 Карта: 561468", 1),  # missing balance
+        HUMO,
+        "Общий баланс недоступен",
+    ],
+)
+def test_balance_summary_rejects(text):
+    assert parse_balance_summary(text) is None
+
+
+async def test_reconcile_summary_message():
+    from unittest.mock import AsyncMock, patch
+    from uuid import uuid4
+
+    acc_ok = SimpleNamespace(id=uuid4(), name="Ipoteka", card_last4="2641", balance_minor=140457770)
+    acc_bad = SimpleNamespace(id=uuid4(), name="Kapital", card_last4="6041", balance_minor=5000000)
+    from src.integrations.telegram import handler
+
+    with patch.object(bank_flow, "_accounts", AsyncMock(return_value=[acc_ok, acc_bad])), \
+            patch.object(handler, "send_message", AsyncMock()) as send:
+        await bank_flow.reconcile_summary(None, uuid4(), 777, "uzcard", parse_balance_summary(SUMMARY), R)
+    text = send.call_args[0][1]
+    rows = send.call_args[1]["reply_markup"]["inline_keyboard"]
+    assert "✅ «Ipoteka»" in text and "⚠️ «Kapital»" in text and "❔ Xalq Banki *0338" in text
+    data = [r[0]["callback_data"] for r in rows]
+    assert any(d.startswith(f"bb:{acc_bad.id}:0:") for d in data)
+    assert any(d.startswith("bc:0338:0:") for d in data)
+    assert all(len(d.encode()) <= 64 for d in data)
+    assert not any(str(acc_ok.id) in d for d in data)  # matching account needs no action
