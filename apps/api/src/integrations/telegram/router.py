@@ -259,6 +259,8 @@ async def connect_telegram(
         "webhook_registered": webhook_registered,
         "mode": mode,
         "miniapp_menu_button": miniapp_button,
+        # Lets the Quick Tunnel watcher know this bot already points at the current URL
+        "public_url": (settings.frontend_url or "").rstrip("/") if webhook_registered else None,
         "enc_token": enc["combined"].hex(),
     }
 
@@ -369,6 +371,7 @@ async def get_telegram_status(
         "webhook_id": integration.config.get("webhook_id"),
         "mode": integration.config.get("mode", "polling"),
         "webhook_registered": integration.config.get("webhook_registered", False),
+        "linked": bool(integration.config.get("chat_id") or integration.config.get("tg_user_id")),
     }
 
 
