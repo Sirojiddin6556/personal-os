@@ -174,14 +174,14 @@ export default function CalendarPage() {
               <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
             <span>
-              В Google Cloud Console для проекта <b>811023701981</b> не активирован сервис Google Calendar API.{' '}
+              Синхронизация не удалась. Если вы подключали свой проект Google Cloud, проверьте, что в нём включён Google Calendar API.{' '}
               <a
-                href="https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview?project=811023701981"
+                href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com"
                 target="_blank"
                 rel="noreferrer"
                 className="underline font-bold text-primary ml-1"
               >
-                Включить в 1 клик в Google Console ↗
+                Открыть Google Cloud Console ↗
               </a>
             </span>
           </div>
