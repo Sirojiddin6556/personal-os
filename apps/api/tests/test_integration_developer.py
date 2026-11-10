@@ -546,13 +546,17 @@ async def test_handle_telegram_update_prompts_expense_confirmation():
         },
     }
 
-    with patch("src.integrations.telegram.handler.send_message", new_callable=AsyncMock) as mock_send:
+    tx = MagicMock(id=uuid4())
+    account = MagicMock()
+    account.name = "Наличные"
+    with patch("src.integrations.telegram.handler.send_message", new_callable=AsyncMock) as mock_send, \
+            patch("src.integrations.telegram.handler.record_expense", new_callable=AsyncMock,
+                  return_value=(tx, account, "Кафе и рестораны", "по названию")) as rec:
         await handle_telegram_update(update, session=mock_session)
-        assert mock_send.called
+        rec.assert_awaited_once()  # recorded right away, no confirmation step
         sent_text = mock_send.call_args[0][1]
         markup = mock_send.call_args[1].get("reply_markup") or mock_send.call_args[0][2]
-        assert "Расход 450 сум" in sent_text
-        assert markup is not None
-        assert "inline_keyboard" in markup
+        assert "Записано: 450 сум" in sent_text and "Кафе и рестораны" in sent_text
+        assert markup["inline_keyboard"][0][0]["callback_data"] == f"txu:{tx.id}"
 
 

@@ -17,7 +17,7 @@ from src.domains.finance.bank_notices import merchant_key
 from src.domains.finance.category_match import best_match, candidates
 from src.domains.finance.models import Category, CategoryRule
 
-AUTO_AFTER = 4
+AUTO_AFTER = 1  # every save is automatic; one correction re-trains the merchant
 
 
 def is_auto(rule: Optional[CategoryRule]) -> bool:

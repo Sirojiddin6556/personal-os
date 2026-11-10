@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
-from src.domains.finance import learning
+from src.domains.finance import auto_category, learning
 from src.domains.finance.bank_notices import (
     PARSERS,
     CardBalance,
@@ -170,12 +170,124 @@ async def ingest(
     s.add(notice)
     await s.flush()
 
+    if account is None and parsed.card_last4:
+        # New card: open an account for it right away instead of asking.
+        account = await finance_service.create_account(
+            s,
+            workspace_id,
+            AccountCreate(
+                name=f"{PROVIDER_TITLE[parsed.provider]} *{parsed.card_last4}",
+                type="checking",
+                currency=parsed.currency,
+                card_last4=parsed.card_last4,
+            ),
+        )
+        notice.account_id = account.id
+        await s.flush()
     if account is None:
-        await _ask_account(s, notice, accounts, chat_id, None)
-    else:
-        await _offer_category(s, workspace_id, notice, account, chat_id, None)
-    await s.commit()
+        await _ask_account(s, notice, accounts, chat_id, None)  # no card number at all: rare
+        await s.commit()
+        return notice
+    await auto_post(s, workspace_id, notice, account, chat_id)
     return notice
+
+
+async def auto_post(s: AsyncSession, workspace_id: UUID, notice: BankNotice, account: Account, chat_id: Any) -> None:
+    """Record without asking: own-card transfer if it pairs up, otherwise categorized automatically."""
+    if await _pair_own_transfer(s, workspace_id, notice, account, chat_id):
+        return
+    category, why = await auto_category.resolve(s, workspace_id, notice.kind, notice.merchant)
+    await _post(s, workspace_id, notice, account, category, chat_id, None, auto=True, why=why)
+
+
+PAIR_WINDOW = timedelta(minutes=10)
+
+
+async def _pair_own_transfer(
+    s: AsyncSession, workspace_id: UUID, notice: BankNotice, account: Account, chat_id: Any
+) -> bool:
+    """A debit on one own card + a credit on another own card, same amount, within 10 minutes,
+    with a transfer-like description on either side -> one transfer, not expense + income."""
+    other_kind = "income" if notice.kind == "expense" else "expense"
+    res = await s.execute(
+        select(BankNotice).where(
+            BankNotice.workspace_id == workspace_id,
+            BankNotice.kind == other_kind,
+            BankNotice.status == "posted",
+            BankNotice.account_id.is_not(None),
+            BankNotice.account_id != account.id,
+            BankNotice.occurred_at >= notice.occurred_at - PAIR_WINDOW,
+            BankNotice.occurred_at <= notice.occurred_at + PAIR_WINDOW,
+        ).with_for_update()
+    )
+    candidates = []
+    for other in res.scalars().all():
+        if any(str(o).startswith("pair:") for o in (other.options or [])):
+            continue
+        out_n, in_n = (notice, other) if notice.kind == "expense" else (other, notice)
+        if not (in_n.amount_minor <= out_n.amount_minor <= in_n.amount_minor * 1.02):
+            continue  # same amount, or the sender paid a small commission (<= 2%)
+        if not (auto_category.looks_like_transfer(notice.merchant) or auto_category.looks_like_transfer(other.merchant)):
+            continue
+        candidates.append(other)
+    if len(candidates) != 1:
+        return False
+    other = candidates[0]
+    out_n, in_n = (notice, other) if notice.kind == "expense" else (other, notice)
+    src = await s.get(Account, out_n.account_id)
+    dst = await s.get(Account, in_n.account_id)
+    if src is None or dst is None:
+        return False
+
+    if other.transaction_id is not None:
+        await finance_service.reverse_transaction(
+            s, workspace_id, other.transaction_id, reason="Перевод между своими картами"
+        )
+    transfer = await finance_service.post_transaction(
+        s,
+        workspace_id,
+        TransactionCreate(
+            account_id=src.id,
+            destination_account_id=dst.id,
+            amount_minor=in_n.amount_minor,
+            currency=in_n.currency,
+            transaction_type="transfer",
+            note=f"Перевод между своими картами ({src.name} → {dst.name})",
+            occurred_at=out_n.occurred_at,
+        ),
+    )
+    extra = [f"pair:{other.id}" if n is notice else f"pair:{notice.id}" for n in (notice,)]
+    fee_minor = out_n.amount_minor - in_n.amount_minor
+    if fee_minor > 0:
+        fee_cat = await auto_category.ensure_category(s, workspace_id, "expense", "Банк и комиссии", "#94A3B8")
+        fee = await finance_service.post_transaction(
+            s,
+            workspace_id,
+            TransactionCreate(
+                account_id=src.id,
+                amount_minor=fee_minor,
+                currency=out_n.currency,
+                transaction_type="expense",
+                category_id=fee_cat.id,
+                note="Комиссия за перевод",
+                occurred_at=out_n.occurred_at,
+            ),
+        )
+        extra.append(f"fee:{fee.id}")
+    notice.status = other.status = "posted"
+    notice.transaction_id = other.transaction_id = transfer.id
+    notice.options = extra
+    other.options = [f"pair:{notice.id}"] + [e for e in extra if e.startswith("fee:")]
+    notice.auto_rule = other.auto_rule = True
+    await s.commit()
+
+    text = (
+        f"🔁 Перевод между своими картами\n{src.name} → {dst.name}: {_money(in_n.amount_minor)} сум"
+        + (f"\nКомиссия: {_money(fee_minor)} сум" if fee_minor > 0 else "")
+        + f"\n🕓 {_local(out_n.occurred_at)}"
+    )
+    await _tg().send_message(chat_id, text, reply_markup={"inline_keyboard": [[_btn("↩️ Отменить", notice, "undo")]]})
+    return True
 
 
 async def _ask_account(
@@ -240,6 +352,7 @@ async def _post(
     chat_id: Any,
     message_id: Optional[int],
     auto: bool = False,
+    why: str = "",
 ) -> None:
     # Human choices train the rule; automatic saves never train themselves.
     if category is not None and not auto and learnable_merchant(notice.merchant):
@@ -265,11 +378,10 @@ async def _post(
     await s.commit()
 
     label = f"«{category.name}»" if category else "без категории"
-    rows = [[_btn("↩️ Отменить", notice, "undo")]]
-    if auto:
-        rows[0].append(_btn("✋ Не записывать сам", notice, "noauto"))
-    prefix = "🤖 Записано автоматически" if auto else "✅ Записано"
-    await _reply(chat_id, message_id, f"{describe(notice, account)}\n\n{prefix}: {label}", {"inline_keyboard": rows})
+    if why:
+        label += f" ({why})"
+    rows = [[_btn("✏️ Категория", notice, "edit"), _btn("↩️ Отменить", notice, "undo")]]
+    await _reply(chat_id, message_id, f"{describe(notice, account)}\n\n✅ Записано: {label}", {"inline_keyboard": rows})
 
 
 # ---------------------------------------------------------------------------
@@ -306,17 +418,57 @@ async def handle_callback(
 
     if action == "undo":
         if notice.status != "posted" or notice.transaction_id is None:
+            await tg.send_message(chat_id, "Эта операция уже отменена.")
             return
         await finance_service.reverse_transaction(s, workspace_id, notice.transaction_id, reason="Отменено в Telegram")
-        notice.status = "pending"
-        notice.transaction_id = None
-        notice.auto_rule = False
-        await s.flush()
-        if account is None:
-            await _ask_account(s, notice, await _accounts(s, workspace_id, notice.currency), chat_id, message_id)
-        else:
-            await _offer_category(s, workspace_id, notice, account, chat_id, message_id, allow_auto=False)
+        refs = [str(o) for o in (notice.options or [])]
+        for ref in refs:
+            kind, _, ref_id = ref.partition(":")
+            try:
+                ref_uuid = UUID(ref_id)
+            except ValueError:
+                continue
+            if kind == "fee":
+                await finance_service.reverse_transaction(s, workspace_id, ref_uuid, reason="Отменено в Telegram")
+            elif kind == "pair":
+                pair = await s.get(BankNotice, ref_uuid)
+                if pair is not None and pair.workspace_id == workspace_id:
+                    pair.status, pair.transaction_id, pair.options = "ignored", None, []
+        notice.status, notice.transaction_id, notice.options = "ignored", None, []
         await s.commit()
+        await _reply(chat_id, message_id, f"{describe(notice, account)}\n\n↩️ Отменено, в учёте этой операции нет.")
+        return
+
+    if action == "edit":
+        if notice.status != "posted" or any(str(o).startswith("pair:") for o in (notice.options or [])):
+            return
+        cats = await learning.categories_of(s, workspace_id, notice.kind)
+        current = None
+        if notice.transaction_id:
+            from src.domains.finance.models import Transaction as _Tx
+
+            tx = await s.get(_Tx, notice.transaction_id)
+            current = tx.category_id if tx else None
+        options = learning.ranked_options(cats, notice.merchant, current, limit=10)
+        notice.options = [str(c.id) for c in options]
+        buttons = [_btn(("• " if c.id == current else "") + c.name, notice, f"c:{i}") for i, c in enumerate(options)]
+        rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
+        await s.commit()
+        await _reply(chat_id, message_id, f"{describe(notice, account)}\n\nВыберите категорию — запомню для этого места:",
+                     {"inline_keyboard": rows})
+        return
+
+    if action == "c" and notice.status == "posted" and account is not None:
+        try:
+            category = await s.get(Category, UUID(notice.options[int(arg or "")]))
+        except (ValueError, IndexError):
+            return
+        if category is None or category.workspace_id != workspace_id:
+            return
+        # Ledger stays immutable: reverse the old entry, post again under the new category.
+        if notice.transaction_id is not None:
+            await finance_service.reverse_transaction(s, workspace_id, notice.transaction_id, reason="Смена категории")
+        await _post(s, workspace_id, notice, account, category, chat_id, message_id, why="ваш выбор")
         return
 
     if action == "noauto":
