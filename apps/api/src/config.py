@@ -115,6 +115,14 @@ class Settings(BaseSettings):
     # follows the changing *.trycloudflare.com URL and re-points the bots automatically.
     quick_tunnel_metrics_url: str = ""
 
+    # Voice messages in Telegram, recognized locally with faster-whisper (no cloud).
+    voice_enabled: bool = True
+    voice_model: str = "small"  # tiny/base/small/medium: bigger = better and slower
+    voice_model_dir: str = "models"  # relative to WORKDIR; keep it out of /app/data (backups)
+    voice_cpu_threads: int = 2
+    voice_max_seconds: int = 180
+    voice_idle_unload_seconds: float = 1800.0
+
     # Google Calendar pull for connected workspaces (seconds, 0 = off)
     calendar_sync_interval_seconds: float = 900.0
 
