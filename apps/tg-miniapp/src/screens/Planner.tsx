@@ -71,7 +71,7 @@ export function PlannerScreen() {
         {upcoming.map((r) => (
           <div key={r.id} className="list-item">
             <span style={{ color: 'var(--warn)', display: 'flex' }}><IconBell size={18} /></span>
-            <div style={{ flex: 1, fontSize: 14 }}>{r.title}</div>
+            <div style={{ flex: 1, minWidth: 0, fontSize: 14, whiteSpace: 'pre-line', overflowWrap: 'anywhere' }}>{r.title}</div>
             <div className="small muted">{dueLabel(r.remind_at)}</div>
           </div>
         ))}

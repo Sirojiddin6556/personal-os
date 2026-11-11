@@ -105,3 +105,13 @@ async def test_slash_commands_are_not_captured_into_inbox():
     item = session.add.call_args.args[0]
     assert item.status == "discarded"
     assert "Такой команды нет" in send.await_args.args[1]
+
+
+def test_long_reminder_title_does_not_break_the_list():
+    from types import SimpleNamespace
+    from src.domains.planner.schemas import PlannerReminderResponse
+
+    row = SimpleNamespace(id=uuid4(), workspace_id=uuid4(), title="x" * 900, remind_at=datetime.now(timezone.utc),
+                          remind_type="custom", related_id=None, is_dismissed=False,
+                          created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
+    assert len(PlannerReminderResponse.model_validate(row).title) == 900
