@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from src.config import settings
-from src.db.session import engine
+from src.db.session import engine, tenant_engine
 from src.domains.ai_advisor.router import router as ai_advisor_router
 from src.domains.calendar.router import router as calendar_router
 from src.domains.dashboard.router import router as dashboard_router
@@ -123,6 +123,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning("Error stopping outbox relay: %s", ex)
 
     await engine.dispose()
+    if tenant_engine is not engine:
+        await tenant_engine.dispose()
     logger.info("Cleanup completed. Engine disposed.")
 
 

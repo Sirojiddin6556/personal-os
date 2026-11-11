@@ -3,6 +3,8 @@ set -e
 if [ "${RUN_MIGRATIONS:-0}" = "1" ]; then
   echo "Applying database migrations..."
   alembic upgrade head
+  # Restricted role for workspace-scoped requests (RLS enforced); no-op without APP_DB_PASSWORD
+  python -m src.db.app_role
 fi
 # ROOT_PATH: public prefix when served behind a proxy path (e.g. /api) so /docs finds openapi.json
 exec uvicorn src.main:app --host 0.0.0.0 --port "${PORT:-8000}" --proxy-headers --forwarded-allow-ips='*' \
