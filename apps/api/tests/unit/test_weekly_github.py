@@ -75,3 +75,12 @@ def test_github_notice_text():
     assert "• [#0] Задача 0 (personal-os)" in text and "…и ещё 2" in text
     assert "✅ Закрыты на GitHub: 1\n• [#3] Старый баг" in text
     assert notice_text([], []) == ""
+
+
+def test_task_enum_status_is_kept():
+    from src.domains.tasks.models import Task, TaskPriority, TaskStatus
+
+    t = Task(title="x", status=TaskStatus.DONE, priority=TaskPriority.HIGH)
+    assert (t.status, t.priority) == ("done", "high")
+    t.status = TaskStatus.TODO
+    assert t.status == "todo"

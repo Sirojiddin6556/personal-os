@@ -77,7 +77,7 @@ class Task(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
     def validate_priority(self, key: str, value: Optional[str]) -> str:
         if not value:
             return "medium"
-        val = str(value).lower().strip()
+        val = str(getattr(value, "value", value)).lower().strip()
         mapping = {
             "p1": "critical",
             "critical": "critical",
@@ -96,7 +96,9 @@ class Task(Base, UUIDMixin, TimestampMixin, WorkspaceMixin):
     def validate_status(self, key: str, value: Optional[str]) -> str:
         if not value:
             return "inbox"
-        val = str(value).lower().strip()
+        # TaskStatus.DONE -> "done" (str() of a str-Enum is "TaskStatus.DONE" on Python 3.11+,
+        # which used to turn every enum-typed status into "inbox").
+        val = str(getattr(value, "value", value)).lower().strip()
         allowed = {"inbox", "todo", "scheduled", "in_progress", "waiting", "done", "cancelled", "archived"}
         return val if val in allowed else "inbox"
 
