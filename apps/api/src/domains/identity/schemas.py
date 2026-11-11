@@ -13,6 +13,7 @@ class UserRegisterRequest(BaseModel):
     full_name: str = Field(min_length=1, max_length=100)
     timezone: str = Field(default="UTC")
     locale: str = Field(default="ru")
+    invite_code: Optional[str] = Field(default=None, max_length=64)
 
 
 class UserLoginRequest(BaseModel):

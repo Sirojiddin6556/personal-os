@@ -24,10 +24,22 @@ export default function LoginPage() {
   const [isOAuthLoading, setIsOAuthLoading] = useState(false);
   // Server may close sign-up (single-user self-hosting); hide the toggle then.
   const [registrationEnabled, setRegistrationEnabled] = useState(false);
+  // One-time invitation link: /login?invite=CODE opens the sign-up form.
+  const [inviteCode, setInviteCode] = useState<string | null>(null);
+  const [inviteState, setInviteState] = useState<'none' | 'valid' | 'invalid'>('none');
 
   useEffect(() => {
-    apiRequest<{ registration_enabled: boolean }>('GET', '/auth/config')
-      .then((cfg) => setRegistrationEnabled(Boolean(cfg?.registration_enabled)))
+    const invite = new URLSearchParams(window.location.search).get('invite');
+    setInviteCode(invite);
+    const query = invite ? `/auth/config?invite=${encodeURIComponent(invite)}` : '/auth/config';
+    apiRequest<{ registration_enabled: boolean; invite_valid?: boolean }>('GET', query)
+      .then((cfg) => {
+        setRegistrationEnabled(Boolean(cfg?.registration_enabled));
+        if (invite) {
+          setInviteState(cfg?.invite_valid ? 'valid' : 'invalid');
+          if (cfg?.invite_valid) setMode('register');
+        }
+      })
       .catch(() => setRegistrationEnabled(false));
   }, []);
 
@@ -55,7 +67,10 @@ export default function LoginPage() {
     try {
       if (mode === 'register') {
         // Create the account (and its personal workspace), then log in below.
-        await apiRequest<unknown, { email: string; password: string; full_name: string; timezone: string }>(
+        await apiRequest<
+          unknown,
+          { email: string; password: string; full_name: string; timezone: string; invite_code?: string }
+        >(
           'POST',
           '/auth/register',
           {
@@ -64,6 +79,7 @@ export default function LoginPage() {
               password,
               full_name: fullName.trim() || email.split('@')[0],
               timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+              ...(inviteState === 'valid' && inviteCode ? { invite_code: inviteCode } : {}),
             },
           }
         );
@@ -161,6 +177,18 @@ export default function LoginPage() {
             Персональная операционная система
           </p>
         </div>
+
+        {inviteState === 'valid' && (
+          <div role="status" className="p-3.5 rounded-xl bg-primary/10 border border-primary/20 text-text-primary text-xs leading-relaxed">
+            Вас пригласили в Personal OS. Создайте аккаунт — у вас будет своё отдельное пространство,
+            ваших данных никто не видит.
+          </div>
+        )}
+        {inviteState === 'invalid' && (
+          <div role="alert" className="p-3.5 rounded-xl bg-status-error/10 border border-status-error/20 text-status-error text-xs leading-relaxed">
+            Приглашение недействительно: оно уже использовано, отозвано или истекло. Попросите новую ссылку.
+          </div>
+        )}
 
         {/* General Error Alert (RFC 9457) */}
         {generalError && (

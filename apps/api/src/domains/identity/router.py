@@ -1,6 +1,6 @@
 """FastAPI router for Auth and Workspaces."""
 
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,8 +26,12 @@ router = APIRouter(tags=["identity"])
 
 
 @router.get("/auth/config", summary="Public sign-in options for the login page")
-async def auth_config(session: AsyncSession = Depends(get_public_session)) -> dict:
-    return {"registration_enabled": await identity_service.registration_open(session)}
+async def auth_config(invite: Optional[str] = None, session: AsyncSession = Depends(get_public_session)) -> dict:
+    from src.domains.identity import invites
+
+    open_ = await identity_service.registration_open(session)
+    invite_valid = bool(invite) and await invites.find(session, invite) is not None
+    return {"registration_enabled": open_ or invite_valid, "invite_valid": invite_valid}
 
 
 @router.post(

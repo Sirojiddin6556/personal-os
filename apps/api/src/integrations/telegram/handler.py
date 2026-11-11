@@ -568,6 +568,12 @@ async def _handle_update(
                 await _limit(s)
         return
 
+    # 4c. Invitations (instance owner): "пригласить Имя", "приглашения"
+    from src.integrations.telegram import invites_bot
+
+    if await invites_bot.handle_command(workspace_id, chat_id, text):
+        return
+
     # 5. Dispatch intent
     async def _dispatch(s: AsyncSession) -> None:
         intent = await ai_parse_telegram_message(text, workspace_id)
@@ -585,6 +591,7 @@ async def _handle_update(
                     "⏰ Напоминания:\n• Напомни выпить витамины\n\n"
                     "📊 Лимит трат на месяц: «лимит 5 млн», посмотреть — «лимит»\n\n"
                     "🎙 Всё это можно надиктовать голосовым — распознаю здесь же, на сервере.\n\n"
+                    "👥 Пригласить человека в своё отдельное пространство: «пригласить Имя»\n\n"
                     "📥 Любой другой текст сохраню во «Входящие» — разберёте одной кнопкой.\n"
                     "☀️ В 08:00 пришлю план дня, 🌙 в 21:00 — итоги.\n\n"
                     "Всё остальное — в приложении: кнопка «Открыть» внизу.",
@@ -709,6 +716,17 @@ async def _handle_callback(
         except Exception as ex:
             logger.exception("Bank notice callback failed: %s", ex)
             await send_message(chat_id, "Не получилось. Попробуйте ещё раз или запишите операцию в приложении.")
+        return
+
+    if data.startswith("iv:"):
+        if not workspace_id:
+            workspace_id = await get_workspace_by_telegram_chat(chat_id, session=session, integration_id=integration_id)
+        if not workspace_id:
+            await send_message(chat_id, NOT_LINKED_TEXT)
+            return
+        from src.integrations.telegram import invites_bot
+
+        await invites_bot.handle_callback(workspace_id, chat_id, cb_message.get("message_id"), data)
         return
 
     if data.startswith(("in:", "dg:")):
