@@ -138,7 +138,7 @@ export function useDashboardToday() {
         : apiDashboard?.budget_summary?.total_balance_minor || 0;
 
     const monthlySpentMinor = apiDashboard?.budget_summary?.monthly_spent_minor || 0;
-    const monthlyLimitMinor = apiDashboard?.budget_summary?.monthly_limit_minor || 1500000000;
+    const monthlyLimitMinor = apiDashboard?.budget_summary?.monthly_limit_minor ?? 0;
     const currency = apiDashboard?.budget_summary?.currency || 'UZS';
 
     const spent = Math.round(monthlySpentMinor / 100);

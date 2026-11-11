@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -25,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import settings
 from src.db.session import async_session_factory
 from src.domains.calendar.models import Event
+from src.domains.finance import limits
 from src.domains.finance.models import Category, Transaction
 from src.domains.identity.models import User, Workspace
 from src.domains.tasks.models import Task
@@ -78,6 +80,10 @@ class DayData:
     spent_minor: int = 0
     spent_by_category: List[Tuple[str, int]] = field(default_factory=list)
     spent_count: int = 0
+    month_spent: int = 0
+    limit: Optional[limits.LimitStatus] = None
+    p2p_unsorted: int = 0
+    p2p_unsorted_minor: int = 0
 
 
 def _day_bounds(d: date, tz: ZoneInfo) -> Tuple[datetime, datetime]:
@@ -130,6 +136,12 @@ async def collect(s: AsyncSession, ws: UUID, d: date, tz: ZoneInfo, spending_day
         select(func.count()).select_from(InboxItem).where(InboxItem.workspace_id == ws, InboxItem.status == "pending")
     )).scalar_one()
     data.spent_minor, data.spent_by_category, data.spent_count = await _spending(s, ws, spending_day, tz)
+    data.limit, data.month_spent = await limits.status(s, ws, d, tz)
+    from src.integrations.telegram.bank_flow import unsorted_p2p
+
+    month_start, _ = limits.month_bounds(d, tz)
+    p2p = await unsorted_p2p(s, ws, month_start)
+    data.p2p_unsorted, data.p2p_unsorted_minor = len(p2p), sum(n.amount_minor for n in p2p)
     return data
 
 
@@ -150,6 +162,36 @@ def _spending_block(header: str, data: DayData) -> List[str]:
     return [f"{header}: {money(data.spent_minor)} ({data.spent_count} опер.)", f"  {top}"]
 
 
+def limit_lines(data: DayData, hint: bool = False) -> List[str]:
+    """Month spending against the limit; a short hint how to set one when there is none."""
+    out: List[str] = []
+    lim = data.limit
+    if lim is not None:
+        icon = "🟥" if lim.percent >= 100 else "🟨" if lim.percent >= 80 else "🟩"
+        out.append(f"{icon} Месяц: {money(lim.spent_minor)} из {money(lim.limit_minor)} ({lim.percent}%)")
+        if lim.left_minor > 0:
+            out.append(f"  Осталось {money(lim.left_minor)} — по {money(lim.per_day_minor)} в день "
+                       f"({lim.days_left} дн.)")
+        else:
+            out.append(f"  Лимит превышен на {money(-lim.left_minor)}")
+    elif data.month_spent:
+        out.append(f"📊 За месяц потрачено: {money(data.month_spent)}")
+        if hint:
+            out.append("  Задать лимит: напишите «лимит 5 млн»")
+    if data.p2p_unsorted:
+        out.append(f"🔁 Переводы без пометки: {data.p2p_unsorted} на {money(data.p2p_unsorted_minor)} — "
+                   "сейчас считаются расходом")
+    return out
+
+
+def limit_alert_text(lim: limits.LimitStatus, threshold: int) -> str:
+    if threshold >= 100:
+        return (f"🟥 Месячный лимит исчерпан: потрачено {money(lim.spent_minor)} из {money(lim.limit_minor)}"
+                + (f" (сверх лимита {money(-lim.left_minor)})." if lim.left_minor < 0 else "."))
+    return (f"🟨 Потрачено {lim.percent}% месячного лимита: {money(lim.spent_minor)} из {money(lim.limit_minor)}.\n"
+            f"До конца месяца {lim.days_left} дн. — можно по {money(lim.per_day_minor)} в день.")
+
+
 def morning_text(d: date, data: DayData, tz: ZoneInfo) -> str:
     out = [f"☀️ Доброе утро! {day_title(d)}", ""]
     out.append("📅 Сегодня:" if data.events else "📅 Событий в календаре нет")
@@ -167,12 +209,14 @@ def morning_text(d: date, data: DayData, tz: ZoneInfo) -> str:
         out.append(f"📥 Во «Входящих» не разобрано: {data.inbox_pending}")
     out.append("")
     out += _spending_block("💳 Вчера потрачено", data)
+    out += limit_lines(data)
     return "\n".join(out).strip()
 
 
 def evening_text(d: date, data: DayData, tomorrow: List, tz: ZoneInfo) -> str:
     out = [f"🌙 Итоги дня — {day_title(d)}", ""]
     out += _spending_block("💳 Потрачено сегодня", data)
+    out += limit_lines(data, hint=True)
     out.append("")
     if data.done_today:
         out.append(f"✅ Сделано ({len(data.done_today)}):")
@@ -260,6 +304,13 @@ async def handle_inbox_callback(s: AsyncSession, ws: UUID, chat_id: Any, message
 async def handle_digest_callback(s: AsyncSession, ws: UUID, chat_id: Any, message_id: Optional[int], data: str) -> None:
     from src.integrations.telegram.handler import send_message
 
+    if data == "dg:p2p":
+        from src.integrations.telegram.bank_flow import ask_unsorted_p2p
+
+        tz = await owner_tz(s, ws)
+        since, _ = limits.month_bounds(datetime.now(tz).date(), tz)
+        await ask_unsorted_p2p(s, ws, chat_id, since)
+        return
     if not data.startswith("dg:carry:"):
         return
     tz = await owner_tz(s, ws)
@@ -332,8 +383,73 @@ async def send_digest(s: AsyncSession, integ: Integration, kind: str, now_local:
         carry = ([{"text": "➡️ Перенести несделанное на завтра", "callback_data": f"dg:carry:{today:%Y%m%d}"}]
                  if data.overdue or data.due_today else [])
         rows = [carry, app_button()]
+    if data.p2p_unsorted:
+        rows.insert(0, [{"text": f"🔁 Разобрать переводы ({data.p2p_unsorted})", "callback_data": "dg:p2p"}])
     rows = [r for r in rows if r]
     await send_message(chat, text, reply_markup={"inline_keyboard": rows} if rows else None, bot_token=token)
+
+
+def mark_limit_announced(integ: Integration, month: str, percent: int, reset: bool = False) -> None:
+    """Remember thresholds already reached this month. ``reset`` (a new limit was set):
+    forget earlier warnings and count only what the current spending already reached,
+    so the user is not warned about what the reply just told them."""
+    cfg = dict(integ.config or {})
+    alerts = dict(cfg.get("limit_alerts") or {})
+    done = [] if reset else [t for t in alerts.get(month, []) if t in limits.THRESHOLDS]
+    done += [t for t in limits.THRESHOLDS if percent >= t and t not in done]
+    cfg["limit_alerts"] = {month: sorted(done)}  # older months are dropped
+    integ.config = cfg
+
+
+LIMIT_RE = re.compile(r"^(?:лимит|limit|бюджет)(?!\w)(?:\s+на\s+месяц)?\s*[:=]?\s*(.*)$", re.I)
+
+
+async def handle_limit_command(s: AsyncSession, ws: UUID, chat_id: Any, arg: str) -> None:
+    """"лимит" shows the month, "лимит 5 млн" sets it, "лимит 0"/"лимит выкл" removes it."""
+    from src.integrations.telegram.handler import send_message
+
+    tz = await owner_tz(s, ws)
+    today = datetime.now(tz).date()
+    arg = arg.strip()
+    if arg:
+        amount = limits.parse_limit_amount(arg)
+        if amount is None:
+            await send_message(chat_id, "Не понял сумму. Примеры: «лимит 5 млн», «лимит 3 500 000», «лимит выкл».")
+            return
+        await limits.set_limit(s, ws, amount)
+    lim, spent = await limits.status(s, ws, today, tz)
+    if lim is None:
+        text = ("Лимит убран." if arg else "Месячный лимит не задан. Напишите, например, «лимит 5 млн».") + (
+            f"\nЗа этот месяц потрачено: {money(spent)}" if spent else "")
+        await send_message(chat_id, text)
+        return
+    integ = (await s.execute(
+        select(Integration).where(Integration.workspace_id == ws, Integration.provider == "telegram")
+    )).scalars().first()
+    if arg and integ is not None:
+        mark_limit_announced(integ, today.strftime("%Y-%m"), lim.percent, reset=True)
+        await s.commit()
+    data = DayData(month_spent=spent, limit=lim)
+    head = f"✅ Лимит на месяц: {money(lim.limit_minor)}" if arg else f"Лимит на месяц: {money(lim.limit_minor)}"
+    await send_message(chat_id, "\n".join([head] + limit_lines(data)
+                                          + ["", "Предупрежу, когда потратите 80% и 100%. Изменить: «лимит 6 млн», убрать: «лимит выкл»."]))
+
+
+async def check_limit(s: AsyncSession, integ: Integration, now_local: datetime, tz: ZoneInfo,
+                      chat: str, token: Optional[str]) -> None:
+    from src.integrations.telegram.handler import send_message
+
+    lim, _ = await limits.status(s, integ.workspace_id, now_local.date(), tz)
+    if lim is None:
+        return
+    month = now_local.strftime("%Y-%m")
+    already = list(((integ.config or {}).get("limit_alerts") or {}).get(month, []))
+    threshold = limits.crossed(lim.percent, already)
+    if threshold is None:
+        return
+    await send_message(chat, limit_alert_text(lim, threshold), bot_token=token)
+    mark_limit_announced(integ, month, lim.percent)
+    await s.commit()
 
 
 async def tick(now: Optional[datetime] = None, seen: Optional[_Seen] = None) -> None:
@@ -364,6 +480,11 @@ async def tick(now: Optional[datetime] = None, seen: Optional[_Seen] = None) -> 
                 cfg["digests_sent"] = sent
                 integ.config = cfg
                 await s.commit()
+
+            try:
+                await check_limit(s, integ, now_local, tz, chat, token)
+            except Exception as ex:
+                logger.warning("Limit check for workspace %s failed: %s", ws, ex)
 
             if seen is None:
                 continue

@@ -381,7 +381,130 @@ async def _post(
     if why:
         label += f" ({why})"
     rows = [[_btn("✏️ Категория", notice, "edit"), _btn("↩️ Отменить", notice, "undo")]]
-    await _reply(chat_id, message_id, f"{describe(notice, account)}\n\n✅ Записано: {label}", {"inline_keyboard": rows})
+    text = f"{describe(notice, account)}\n\n✅ Записано: {label}"
+    if is_p2p(notice):
+        rows.insert(0, p2p_row(notice, "exp" if not auto else None))
+        if auto:
+            text += "\n" + P2P_QUESTION[notice.kind]
+    await _reply(chat_id, message_id, text, {"inline_keyboard": rows})
+
+
+# ---------------------------------------------------------------------------
+# P2P transfers to/from other people: expense, own money elsewhere, or a loan
+# ---------------------------------------------------------------------------
+OWN_ACCOUNT = "Мои другие карты и кошельки"
+DEBT_ACCOUNT = "Мне должны"
+P2P_QUESTION = {
+    "expense": "Это перевод. Если это не трата — отметьте: себе на другую карту или в долг.",
+    "income": "Это перевод. Если это не доход — отметьте: со своей карты или вам вернули долг.",
+}
+P2P_LABELS = {
+    "expense": {"exp": "🛒 Это расход", "own": "👤 Себе", "debt": "🤝 Дал в долг"},
+    "income": {"exp": "💰 Это доход", "own": "👤 Со своей карты", "debt": "🤝 Вернули долг"},
+}
+P2P_DONE = {
+    "expense": {"own": "👤 Перевод себе", "debt": "🤝 Дали в долг"},
+    "income": {"own": "👤 Со своей карты", "debt": "🤝 Вернули долг"},
+}
+
+
+def is_p2p(notice: BankNotice) -> bool:
+    if any(str(o).startswith("pair:") for o in (notice.options or [])):
+        return False  # already a transfer between two cards that are both in the app
+    return auto_category.looks_like_transfer(notice.merchant)
+
+
+def p2p_mark(notice: BankNotice) -> Optional[str]:
+    return next((str(o)[4:] for o in (notice.options or []) if str(o).startswith("p2p:")), None)
+
+
+def p2p_row(notice: BankNotice, current: Optional[str]) -> List[Dict[str, str]]:
+    labels = P2P_LABELS[notice.kind]
+    return [_btn(("• " if key == current else "") + labels[key], notice, f"p:{key}") for key in ("exp", "own", "debt")]
+
+
+async def _ensure_account(s: AsyncSession, workspace_id: UUID, name: str, currency: str) -> Account:
+    for acc in await _accounts(s, workspace_id, currency):
+        if acc.name == name:
+            return acc
+    return await finance_service.create_account(
+        s, workspace_id, AccountCreate(name=name, type="savings", currency=currency)
+    )
+
+
+async def classify_p2p(
+    s: AsyncSession, workspace_id: UUID, notice: BankNotice, account: Account, choice: str,
+    chat_id: Any, message_id: Optional[int],
+) -> None:
+    """Re-book a posted P2P notice as expense/income ("exp"), own money ("own") or a loan ("debt")."""
+    if choice not in ("exp", "own", "debt") or not is_p2p(notice):
+        return
+    if p2p_mark(notice) == choice:
+        await _tg().send_message(chat_id, "Уже отмечено так.")
+        return
+    if notice.transaction_id is not None:
+        await finance_service.reverse_transaction(s, workspace_id, notice.transaction_id, reason="Уточнение перевода")
+        notice.transaction_id = None
+    if choice == "exp":
+        category, _ = await auto_category.resolve(s, workspace_id, notice.kind, notice.merchant)
+        notice.options = ["p2p:exp"]
+        await _post(s, workspace_id, notice, account, category, chat_id, message_id, why="ваш выбор")
+        return
+
+    other = await _ensure_account(s, workspace_id, OWN_ACCOUNT if choice == "own" else DEBT_ACCOUNT, notice.currency)
+    src, dst = (account, other) if notice.kind == "expense" else (other, account)
+    tx = await finance_service.post_transaction(
+        s,
+        workspace_id,
+        TransactionCreate(
+            account_id=src.id,
+            destination_account_id=dst.id,
+            amount_minor=notice.amount_minor,
+            currency=notice.currency,
+            transaction_type="transfer",
+            note=f"{P2P_DONE[notice.kind][choice]}: {notice.merchant}" if notice.merchant else P2P_DONE[notice.kind][choice],
+            occurred_at=notice.occurred_at,
+        ),
+    )
+    notice.status, notice.transaction_id, notice.options, notice.auto_rule = "posted", tx.id, [f"p2p:{choice}"], False
+    await s.commit()
+    rows = [p2p_row(notice, choice), [_btn("↩️ Отменить", notice, "undo")]]
+    what = "не расход" if notice.kind == "expense" else "не доход"
+    await _reply(
+        chat_id, message_id,
+        f"{describe(notice, account)}\n\n✅ {P2P_DONE[notice.kind][choice]} → «{other.name}» ({what})",
+        {"inline_keyboard": rows},
+    )
+
+
+async def unsorted_p2p(s: AsyncSession, workspace_id: UUID, since: datetime) -> List[BankNotice]:
+    """P2P notices booked automatically and never confirmed by the user."""
+    res = await s.execute(
+        select(BankNotice)
+        .where(
+            BankNotice.workspace_id == workspace_id,
+            BankNotice.status == "posted",
+            BankNotice.auto_rule.is_(True),
+            BankNotice.occurred_at >= since,
+        )
+        .order_by(BankNotice.occurred_at)
+    )
+    return [n for n in res.scalars().all() if is_p2p(n) and p2p_mark(n) is None]
+
+
+async def ask_unsorted_p2p(s: AsyncSession, workspace_id: UUID, chat_id: Any, since: datetime, limit: int = 10) -> int:
+    tg = _tg()
+    notices = await unsorted_p2p(s, workspace_id, since)
+    for notice in notices[:limit]:
+        account = await s.get(Account, notice.account_id) if notice.account_id else None
+        await tg.send_message(
+            chat_id,
+            f"{describe(notice, account)}\n\n{P2P_QUESTION[notice.kind]}",
+            reply_markup={"inline_keyboard": [p2p_row(notice, None)]},
+        )
+    if not notices:
+        await tg.send_message(chat_id, "Неразобранных переводов нет 👍")
+    return len(notices)
 
 
 # ---------------------------------------------------------------------------
@@ -439,8 +562,15 @@ async def handle_callback(
         await _reply(chat_id, message_id, f"{describe(notice, account)}\n\n↩️ Отменено, в учёте этой операции нет.")
         return
 
+    if action == "p":
+        if notice.status == "posted" and account is not None:
+            await classify_p2p(s, workspace_id, notice, account, arg or "", chat_id, message_id)
+        return
+
     if action == "edit":
-        if notice.status != "posted" or any(str(o).startswith("pair:") for o in (notice.options or [])):
+        if notice.status != "posted" or any(
+            str(o).startswith(("pair:", "p2p:own", "p2p:debt")) for o in (notice.options or [])
+        ):
             return
         cats = await learning.categories_of(s, workspace_id, notice.kind)
         current = None
