@@ -260,11 +260,41 @@ def parse_reminder(raw: str, now: Optional[datetime] = None) -> Tuple[str, datet
     if m_day:
         day_offset = {"сегодня": 0, "завтра": 1, "послезавтра": 2}[m_day.group(1).lower()]
         text = (text[: m_day.start()] + " " + text[m_day.end():]).strip()
-    m_time = re.search(r"(?:(?:^|\s)(?:в|к|на)\s+)?(\d{1,2})[:.](\d{2})(?=\s|$)", text)
-    if m_time and int(m_time.group(1)) < 24 and int(m_time.group(2)) < 60:
-        target = (now_local + timedelta(days=day_offset)).replace(
-            hour=int(m_time.group(1)), minute=int(m_time.group(2)), second=0, microsecond=0
-        )
+    # "через 2 часа", "через 15 минут", "через час", "через полчаса"
+    m_in = re.search(
+        r"(?:^|\s)через\s+(?:(\d+(?:[.,]5)?|полчаса|пару)\s*)?(минут[уы]?|мин\.?|час(?:а|ов)?|ч\.?)?(?=\s|$)",
+        text, re.IGNORECASE,
+    )
+    # "в 19:00", "в 9.30", "в 7 30", "в 9 утра", "в 7 вечера", "в 19 часов", "к 10"
+    m_time = re.search(
+        r"(?:(?:^|\s)(?:в|к|на)\s+)?(\d{1,2})[:.](\d{2})(?=\s|$)"
+        r"|(?:^|\s)(?:в|к)\s+(\d{1,2})(?:\s+(\d{2}))?(?:\s+(утра|дня|вечера|ночи|час(?:а|ов)?))?(?=\s|$)",
+        text, re.IGNORECASE,
+    )
+    hour = minute = None
+    if m_time:
+        hour = int(m_time.group(1) or m_time.group(3))
+        minute = int(m_time.group(2) or m_time.group(4) or 0)
+        part = (m_time.group(5) or "").lower()
+        if part in ("дня", "вечера") and hour < 12:
+            hour += 12
+        elif part == "ночи" and hour == 12:
+            hour = 0
+        elif not part and m_time.group(3) and 1 <= hour <= 6:
+            hour += 12  # "в 5" said in conversation means 17:00
+    if m_in and (m_in.group(1) or m_in.group(2)) and not m_time:
+        amount_raw = (m_in.group(1) or "1").lower()
+        unit = (m_in.group(2) or "час").lower()
+        amount = {"полчаса": 30, "пару": 2}.get(amount_raw)
+        if amount_raw == "полчаса":
+            delta = timedelta(minutes=30)
+        else:
+            value = float(amount if amount is not None else amount_raw.replace(",", "."))
+            delta = timedelta(minutes=value) if unit.startswith("мин") else timedelta(hours=value)
+        target = now_local + delta
+        text = (text[: m_in.start()] + " " + text[m_in.end():]).strip()
+    elif hour is not None and hour < 24 and minute < 60:
+        target = (now_local + timedelta(days=day_offset)).replace(hour=hour, minute=minute, second=0, microsecond=0)
         if day_offset == 0 and target <= now_local:
             target += timedelta(days=1)
         text = (text[: m_time.start()] + " " + text[m_time.end():]).strip()

@@ -126,11 +126,83 @@ def clean(text: str) -> str:
     return text
 
 
+_UNITS = {
+    "ноль": 0, "один": 1, "одна": 1, "одну": 1, "два": 2, "две": 2, "три": 3, "четыре": 4, "пять": 5,
+    "шесть": 6, "семь": 7, "восемь": 8, "девять": 9, "десять": 10, "одиннадцать": 11, "двенадцать": 12,
+    "тринадцать": 13, "четырнадцать": 14, "пятнадцать": 15, "шестнадцать": 16, "семнадцать": 17,
+    "восемнадцать": 18, "девятнадцать": 19, "полтора": 1.5, "полторы": 1.5,
+}
+_TENS = {"двадцать": 20, "тридцать": 30, "сорок": 40, "пятьдесят": 50, "шестьдесят": 60, "семьдесят": 70,
+         "восемьдесят": 80, "девяносто": 90}
+_HUNDREDS = {"сто": 100, "двести": 200, "триста": 300, "четыреста": 400, "пятьсот": 500, "шестьсот": 600,
+             "семьсот": 700, "восемьсот": 800, "девятьсот": 900}
+
+
+def _scale(word: str) -> int:
+    if word.startswith(("тысяч", "тыщ")) or word in ("тыс", "тыс."):
+        return 1000
+    if word.startswith(("миллион", "милион")) or word in ("млн", "млн."):
+        return 1_000_000
+    return 0
+
+
+def words_to_digits(text: str) -> str:
+    """'сорок пять тысяч такси' -> '45000 такси', 'в семь тридцать' -> 'в 7 30',
+    'лимит пять милионов' -> 'лимит 5000000' (Whisper often spells numbers out)."""
+    out: list = []
+    total = group = 0.0
+    rank = 9  # 3 hundreds > 2 tens > 1 units: inside a number each word must be smaller
+    active = False
+
+    def flush() -> None:
+        nonlocal total, group, rank, active
+        if active:
+            value = total + group
+            out.append(str(int(value)) if value == int(value) else str(value).replace(".", ","))
+        total = group = 0.0
+        rank, active = 9, False
+
+    for raw in text.split():
+        word = raw.lower().strip(",.!?;:")
+        tail = raw[len(raw.rstrip(",.!?;:")):]
+        kind = 3 if word in _HUNDREDS else 2 if word in _TENS else 1 if word in _UNITS else 0
+        scale = _scale(word)
+        if kind:
+            if kind >= rank or (kind == 1 and rank == 1):
+                flush()
+            group += (_HUNDREDS.get(word) or _TENS.get(word) or _UNITS[word])
+            rank, active = kind, True
+        elif scale and (active or (out and _is_number(out[-1]))):
+            if not active:  # "45 тысяч": the number was already a digit token
+                group, active = float(out.pop().replace(",", ".")), True
+            total += (group or 1) * scale
+            group, rank = 0.0, 9
+        else:
+            flush()
+            out.append(raw)
+            continue
+        if tail:
+            flush()
+            out[-1] += tail
+    flush()
+    return " ".join(out)
+
+
+def _is_number(token: str) -> bool:
+    import re
+
+    return bool(re.fullmatch(r"\d+(?:[.,]\d+)?", token))
+
+
 def normalize(text: str) -> str:
-    """Spoken forms -> what the text parsers expect: '45 тысяч такси.' -> '45 тыс такси'."""
+    """Spoken forms -> what the text parsers expect: '45 тысяч такси.' -> '45000 такси'."""
     import re
 
     text = text.strip().rstrip(".!…").strip()
+    text = re.sub(r"(\d)\s+(\d{3})(?!\d)", r"\1\2", text)  # "45 000" -> "45000" before scales
+    text = words_to_digits(text)
+    # "Задача – купить молоко" -> "Задача: купить молоко"
+    text = re.sub(r"^(\w+)\s+[–—-]\s+", r"\1: ", text)
 
     def millions(m: "re.Match[str]") -> str:
         value = float(m[1].replace(" ", "").replace(",", "."))
