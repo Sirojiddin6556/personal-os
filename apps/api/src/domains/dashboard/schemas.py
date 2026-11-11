@@ -18,7 +18,7 @@ class BudgetSummary(BaseModel):
     total_balance_minor: int
     today_spent_minor: int = 0
     monthly_spent_minor: int = 0
-    monthly_limit_minor: int = 1500000000  # Default 15,000,000 UZS
+    monthly_limit_minor: int = 0  # overall monthly limit; 0 = not set
     currency: str = "UZS"
     active_accounts_count: int
 

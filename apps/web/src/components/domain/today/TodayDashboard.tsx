@@ -298,7 +298,8 @@ export function TodayDashboard() {
                   Израсходовано {percentage}%
                 </span>
                 <span className="font-mono text-text-primary font-bold">
-                  {spent.toLocaleString('ru-RU')} / {limit.toLocaleString('ru-RU')} {budgetSummary.currency === 'RUB' ? '₽' : 'сум'}
+                  {spent.toLocaleString('ru-RU')}
+                  {limit > 0 ? ` / ${limit.toLocaleString('ru-RU')}` : ''} {budgetSummary.currency === 'RUB' ? '₽' : 'сум'}
                 </span>
               </div>
 
@@ -323,9 +324,13 @@ export function TodayDashboard() {
               </div>
 
               <div className="flex items-center justify-between mt-2 text-xs">
-                <span className="text-text-muted">
-                  Остаток лимита: <strong className="text-emerald-600 font-mono">{remaining.toLocaleString('ru-RU')} {budgetSummary.currency === 'RUB' ? '₽' : 'сум'}</strong>
-                </span>
+                {limit > 0 ? (
+                  <span className="text-text-muted">
+                    Остаток лимита: <strong className="text-emerald-600 font-mono">{remaining.toLocaleString('ru-RU')} {budgetSummary.currency === 'RUB' ? '₽' : 'сум'}</strong>
+                  </span>
+                ) : (
+                  <span className="text-text-muted">Лимит не задан — напишите боту «лимит 5 млн»</span>
+                )}
                 <span className="text-[11px] text-text-muted">Лимит обновляется 1-го числа</span>
               </div>
             </section>

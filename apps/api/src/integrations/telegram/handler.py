@@ -475,6 +475,21 @@ async def _handle_update(
         )
         return
 
+    # 4b. Monthly spending limit: "лимит", "лимит 5 млн", "лимит выкл"
+    from src.integrations.telegram import daily
+
+    limit_match = daily.LIMIT_RE.match(text)
+    if limit_match:
+        async def _limit(s: AsyncSession) -> None:
+            await daily.handle_limit_command(s, workspace_id, chat_id, limit_match[1])
+
+        if session is not None:
+            await _limit(session)
+        else:
+            async with _tenant_session(workspace_id) as s:
+                await _limit(s)
+        return
+
     # 5. Dispatch intent
     async def _dispatch(s: AsyncSession) -> None:
         intent = await ai_parse_telegram_message(text, workspace_id)
@@ -490,6 +505,7 @@ async def _handle_update(
                     "💳 Расходы:\n• 45000 такси\n• Потратил 120 тыс на обед\n"
                     "• Пересылайте сюда уведомления @HumoCardBot и @CardXabarBot — запишу сам\n\n"
                     "⏰ Напоминания:\n• Напомни выпить витамины\n\n"
+                    "📊 Лимит трат на месяц: «лимит 5 млн», посмотреть — «лимит»\n\n"
                     "📥 Любой другой текст сохраню во «Входящие» — разберёте одной кнопкой.\n"
                     "☀️ В 08:00 пришлю план дня, 🌙 в 21:00 — итоги.\n\n"
                     "Всё остальное — в приложении: кнопка «Открыть» внизу.",

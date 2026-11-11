@@ -237,11 +237,16 @@ async def get_budget_summary(
     monthly_res = await session.execute(monthly_stmt)
     monthly_spent = monthly_res.scalar_one() or 0
 
+    # The overall monthly limit set in Telegram ("лимит 5 млн"); 0 = not set.
+    from src.domains.finance.limits import get_limit
+
+    limit = await get_limit(session, workspace_id)
+
     return BudgetSummary(
         total_balance_minor=int(total_balance),
         today_spent_minor=int(today_spent),
         monthly_spent_minor=int(monthly_spent),
-        monthly_limit_minor=1500000000,
+        monthly_limit_minor=limit.amount_minor if limit else 0,
         currency="UZS",
         active_accounts_count=active_count,
     )
