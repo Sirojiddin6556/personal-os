@@ -36,6 +36,30 @@ class VoiceError(Exception):
     """Message for the user."""
 
 
+SAMPLE_RATE = 16000
+
+
+def decode(audio: bytes) -> Any:
+    """Any container/codec PyAV reads (Telegram OGG/Opus, MP3, M4A, WAV) -> 16 kHz mono float32.
+
+    Done here rather than by faster-whisper: its decoder passes an option newer PyAV removed.
+    """
+    import av
+    import numpy as np
+
+    chunks = []
+    with av.open(io.BytesIO(audio), mode="r") as container:
+        resampler = av.AudioResampler(format="s16", layout="mono", rate=SAMPLE_RATE)
+        for frame in container.decode(audio=0):
+            for out in resampler.resample(frame):
+                chunks.append(out.to_ndarray().reshape(-1))
+        for out in resampler.resample(None):  # flush
+            chunks.append(out.to_ndarray().reshape(-1))
+    if not chunks:
+        raise VoiceError("В сообщении нет звука.")
+    return np.concatenate(chunks).astype(np.float32) / 32768.0
+
+
 class _Engine:
     def __init__(self) -> None:
         self.model: Any = None
@@ -59,7 +83,7 @@ class _Engine:
 
     def _run(self, audio: bytes) -> str:
         segments, _info = self.model.transcribe(
-            io.BytesIO(audio),
+            decode(audio),
             language="ru",
             beam_size=1,
             vad_filter=True,
