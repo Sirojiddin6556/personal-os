@@ -315,6 +315,17 @@ export async function apiRequest<TData, TBody = unknown>(
     // 401 Unauthorized: broadcast session expiration
     if (response.status === 401 && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('auth:session_expired'));
+      // Expired/invalid session: go to the login page instead of showing empty sections.
+      // (/auth/* answers 401 for a wrong password — that is handled by the form itself.)
+      if (!cleanPath.startsWith('/auth/') && !/\/login\/?$/.test(window.location.pathname)) {
+        try {
+          localStorage.removeItem('personal_os_access_token');
+          localStorage.removeItem('personal_os_user');
+          document.cookie = 'personal_os_access_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax';
+        } catch {}
+        const base = process.env.NEXT_PUBLIC_BASE_PATH || '';
+        window.location.href = `${base}/login`;
+      }
     }
 
     // Extract current version from ETag header if present on 412/409
