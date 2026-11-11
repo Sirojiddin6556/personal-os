@@ -391,59 +391,104 @@ class GitHubService:
     async def sync_project_issues_as_tasks(
         self, session: AsyncSession, workspace_id: UUID, project_id: UUID
     ) -> List[Task]:
-        """Import open GitHub issues as local Tasks under this project."""
+        """Import open GitHub issues as local Tasks under this project (manual button)."""
         stmt = select(Project).where(Project.id == project_id, Project.workspace_id == workspace_id)
-        res = await session.execute(stmt)
-        project = res.scalar_one_or_none()
+        project = (await session.execute(stmt)).scalar_one_or_none()
         if not project:
             raise NotFoundError("Project", project_id)
-
-        owner, repo, _ = self._parse_repo_from_project(project)
         client = await self.get_client(session, workspace_id)
-        issues = await client.list_issues(owner, repo, state="open", limit=30)
+        result = await self.sync_issues(session, workspace_id, project, client)
+        await session.commit()
+        for t in result.created:
+            await session.refresh(t)
+        return result.created
 
-        imported_tasks: List[Task] = []
+    async def sync_issues(
+        self, session: AsyncSession, workspace_id: UUID, project: Project, client: GitHubClient
+    ) -> "IssueSyncResult":
+        """One-way GitHub issues -> tasks: new open issues become tasks, closed issues close
+        their task, renamed issues rename it. Local edits are never pushed to GitHub.
+
+        Issues are matched through ExternalMapping (entity_type 'task', external_id = issue
+        URL); tasks imported before the mapping existed are matched by their "[#N] ..." title.
+        Does not commit.
+        """
+        owner, repo, _ = self._parse_repo_from_project(project)
+        integration = await self._get_integration(session, workspace_id)
+        issues = await client.list_issues(owner, repo, state="all", limit=100)
+        result = IssueSyncResult()
+        now = datetime.now(timezone.utc)
         for iss in issues:
-            # Skip pull requests (which GitHub returns in issues endpoint if 'pull_request' key is present)
-            if "pull_request" in iss:
+            if "pull_request" in iss or not iss.get("html_url"):
                 continue
+            url = str(iss["html_url"])
+            title = f"[#{iss.get('number')}] {iss.get('title') or ''}".strip()[:500]
+            is_open = iss.get("state") == "open"
 
-            issue_title = f"[#{iss.get('number')}] {iss.get('title')}"
-            issue_body = iss.get("body") or ""
-            issue_url = iss.get("html_url")
+            mapping = (await session.execute(
+                select(ExternalMapping).where(
+                    ExternalMapping.integration_id == integration.id,
+                    ExternalMapping.entity_type == "task",
+                    ExternalMapping.external_id == url,
+                )
+            )).scalar_one_or_none()
+            task = await session.get(Task, mapping.internal_id) if mapping else None
+            if task is None:
+                task = (await session.execute(
+                    select(Task).where(
+                        Task.workspace_id == workspace_id,
+                        Task.project_id == project.id,
+                        Task.title.like(f"[#{iss.get('number')}] %"),
+                        Task.is_deleted.is_(False),
+                    ).limit(1)
+                )).scalar_one_or_none()
+            if task is not None and task.workspace_id != workspace_id:
+                task = None
+            if task is not None and task.is_deleted:
+                continue  # the user deleted it here: never bring it back
 
-            desc = f"{issue_body}\n\nGitHub Issue: {issue_url}".strip()
+            if task is None:
+                if not is_open:
+                    continue  # closed before we ever saw it: nothing to do
+                task = Task(
+                    id=uuid4(),
+                    workspace_id=workspace_id,
+                    project_id=project.id,
+                    title=title,
+                    description=f"{iss.get('body') or ''}\n\nGitHub Issue: {url}".strip(),
+                    status=TaskStatus.TODO,
+                    priority=TaskPriority.MEDIUM,
+                    version=1,
+                )
+                session.add(task)
+                await session.flush()
+                result.created.append(task)
+            else:
+                changed = False
+                if task.title != title and not task.is_deleted:
+                    task.title, changed = title, True
+                status = getattr(task.status, "value", task.status)
+                if not is_open and status not in ("done", "cancelled", "archived"):
+                    task.status, task.completed_at, changed = TaskStatus.DONE, now, True
+                    result.closed.append(task)
+                if changed:
+                    task.version += 1
 
-            # Check if task already exists
-            existing_task_stmt = select(Task).where(
-                Task.workspace_id == workspace_id,
-                Task.project_id == project_id,
-                Task.title == issue_title,
-                Task.is_deleted.is_(False),
-            )
-            existing_res = await session.execute(existing_task_stmt)
-            if existing_res.scalar_one_or_none():
-                continue
+            if mapping is None:
+                session.add(ExternalMapping(
+                    id=uuid4(), workspace_id=workspace_id, integration_id=integration.id,
+                    entity_type="task", internal_id=task.id, external_id=url, last_synced_at=now,
+                ))
+            else:
+                mapping.internal_id, mapping.last_synced_at = task.id, now
+        await session.flush()
+        return result
 
-            task = Task(
-                id=uuid4(),
-                workspace_id=workspace_id,
-                project_id=project_id,
-                title=issue_title,
-                description=desc,
-                status=TaskStatus.TODO,
-                priority=TaskPriority.MEDIUM,
-                version=1,
-            )
-            session.add(task)
-            imported_tasks.append(task)
 
-        if imported_tasks:
-            await session.commit()
-            for t in imported_tasks:
-                await session.refresh(t)
-
-        return imported_tasks
+class IssueSyncResult:
+    def __init__(self) -> None:
+        self.created: List[Task] = []
+        self.closed: List[Task] = []
 
 
 github_service = GitHubService()

@@ -238,11 +238,16 @@ async def test_github_service_project_operations(mock_session):
 
         # Sync issues
         mock_client.list_issues.return_value = [
-            {"number": 42, "title": "Fix bug in planner", "body": "Details", "html_url": "https://github.com/issue/42"}
+            {"number": 42, "title": "Fix bug in planner", "body": "Details", "state": "open",
+             "html_url": "https://github.com/issue/42"},
+            {"number": 7, "title": "Old closed", "state": "closed", "html_url": "https://github.com/issue/7"},
         ]
         mock_session.execute.side_effect = [
             MagicMock(scalar_one_or_none=MagicMock(return_value=mock_proj)),
-            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # not existing task
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # no mapping for #42
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # no task "[#42] ..."
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # no mapping for #7
+            MagicMock(scalar_one_or_none=MagicMock(return_value=None)),  # closed, never seen: skipped
         ]
         tasks = await github_service.sync_project_issues_as_tasks(mock_session, ws_id, proj_id)
         assert len(tasks) == 1

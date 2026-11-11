@@ -59,6 +59,10 @@ def due_digests(now_local: datetime, sent: Dict[str, str]) -> List[str]:
     for kind, (start, end) in (("morning", MORNING), ("evening", EVENING)):
         if start <= now_local.time() <= end and sent.get(kind) != today:
             due.append(kind)
+    from src.integrations.telegram import weekly
+
+    if weekly.is_due(now_local, sent):
+        due.append("weekly")
     return due
 
 
@@ -373,6 +377,12 @@ async def send_digest(s: AsyncSession, integ: Integration, kind: str, now_local:
 
     today = now_local.date()
     ws = integ.workspace_id
+    if kind == "weekly":
+        from src.integrations.telegram import weekly
+
+        w = await weekly.collect(s, ws, today, tz)
+        await send_message(chat, weekly.weekly_text(w, tz), reply_markup=weekly.keyboard(w, today), bot_token=token)
+        return
     if kind == "morning":
         data = await collect(s, ws, today, tz, spending_day=today - timedelta(days=1))
         text, rows = morning_text(today, data, tz), [app_button()]
@@ -515,7 +525,7 @@ class DailyLoop:
     async def start(self) -> None:
         if self._task is None:
             self._task = asyncio.create_task(self._loop())
-            logger.info("Daily Telegram loop started (digests 08:00/21:00, event reminders).")
+            logger.info("Daily Telegram loop started (digests 08:00/21:00, weekly Sun 20:00, event reminders).")
 
     async def stop(self) -> None:
         if self._task:

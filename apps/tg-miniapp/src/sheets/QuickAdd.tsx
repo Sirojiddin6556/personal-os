@@ -27,7 +27,7 @@ export function QuickAddSheet({ prefill, onClose }: { prefill: string; onClose: 
   const p = parseQuickAdd(text);
   const account = (accounts.data ?? []).find((a) => !a.is_archived && a.type === 'cash') ?? (accounts.data ?? []).find((a) => !a.is_archived);
 
-  let tag = 'AI';
+  let tag = '…';
   let tagColor = 'var(--hint)';
   let preview = 'Начните вводить текст';
   let action = 'Добавить';
