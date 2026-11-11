@@ -72,6 +72,9 @@ class PlannerReminderCreate(BaseModel):
 class PlannerReminderResponse(PlannerReminderCreate):
     model_config = ConfigDict(from_attributes=True)
 
+    # Reading must never fail on stored data: rows created by the bot or by hand
+    # may be longer than the create limit, and one such row used to 500 the list.
+    title: str
     id: UUID
     workspace_id: UUID
     is_dismissed: bool
