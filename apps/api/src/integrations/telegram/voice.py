@@ -203,6 +203,8 @@ def normalize(text: str) -> str:
     text = words_to_digits(text)
     # "Задача – купить молоко" -> "Задача: купить молоко"
     text = re.sub(r"^(\w+)\s+[–—-]\s+", r"\1: ", text)
+    # "Напомни, в 7 вечера ..." -> "Напомни в 7 вечера ..."
+    text = re.sub(r"^(\w+),\s+", r"\1 ", text)
 
     def millions(m: "re.Match[str]") -> str:
         value = float(m[1].replace(" ", "").replace(",", "."))
