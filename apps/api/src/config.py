@@ -123,6 +123,9 @@ class Settings(BaseSettings):
     voice_max_seconds: int = 180
     voice_idle_unload_seconds: float = 1800.0
 
+    # GitHub issues -> tasks for projects linked to a repository (seconds, 0 = off)
+    github_sync_interval_seconds: float = 1800.0
+
     # Google Calendar pull for connected workspaces (seconds, 0 = off)
     calendar_sync_interval_seconds: float = 900.0
 

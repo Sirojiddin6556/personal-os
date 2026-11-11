@@ -5,14 +5,15 @@ import { usePathname } from 'next/navigation';
 import { useUIStore } from '@/stores/ui-store';
 import { cn, withBase } from '@/lib/utils';
 
-import { useProjects } from '@/hooks/useGitHub';
+// Sections used every day stay on top; the rest live under "Ещё".
+const MAIN = ['/today', '/tasks', '/calendar', '/finance'];
 
 export function SidebarNav() {
   const pathname = usePathname() || '/today';
   const { isSidebarCollapsed, toggleSidebar } = useUIStore();
-  const { data: dbProjects = [] } = useProjects();
+  const [moreOpen, setMoreOpen] = React.useState(false);
 
-  const navItems = [
+  const allItems = [
     {
       label: 'Сегодня',
       href: '/today',
@@ -52,7 +53,20 @@ export function SidebarNav() {
       ),
     },
     {
-      label: 'Проекты & GitHub',
+      label: 'Заметки',
+      href: '/notes',
+      badge: null,
+      icon: (
+        <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <polyline points="14 2 14 8 20 8" />
+          <line x1="8" y1="13" x2="16" y2="13" />
+          <line x1="8" y1="17" x2="13" y2="17" />
+        </svg>
+      ),
+    },
+    {
+      label: 'Проекты и GitHub',
       href: '/projects',
       badge: null,
       icon: (
@@ -97,6 +111,32 @@ export function SidebarNav() {
       ),
     },
   ];
+  const navItems = allItems.filter((i) => MAIN.includes(i.href));
+  const moreItems = allItems.filter((i) => !MAIN.includes(i.href));
+  const moreActive = moreItems.some((i) => pathname.startsWith(i.href));
+  const showMore = moreOpen || moreActive || isSidebarCollapsed;
+
+  const renderItem = (item: (typeof allItems)[number]) => {
+    const isActive = pathname.startsWith(item.href);
+    return (
+      <a
+        key={item.href}
+        href={item.href}
+        title={isSidebarCollapsed ? item.label : undefined}
+        aria-current={isActive ? 'page' : undefined}
+        className={cn(
+          'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-fast',
+          isActive
+            ? 'bg-primary/10 text-primary-600 dark:text-primary-400 font-semibold'
+            : 'text-text-secondary hover:text-text-primary hover:bg-surface-muted',
+          isSidebarCollapsed && 'justify-center px-0'
+        )}
+      >
+        {item.icon}
+        {!isSidebarCollapsed && <span className="truncate flex-1">{item.label}</span>}
+      </a>
+    );
+  };
 
   return (
     <aside
@@ -115,7 +155,7 @@ export function SidebarNav() {
           {!isSidebarCollapsed && (
             <div className="flex flex-col truncate">
               <span className="font-bold text-sm tracking-tight text-text-primary">Personal OS</span>
-              <span className="text-[10px] text-text-muted">AI Workspace</span>
+              <span className="text-[10px] text-text-muted">Личная система</span>
             </div>
           )}
         </a>
@@ -123,78 +163,32 @@ export function SidebarNav() {
 
       {/* Main Nav Items (L1) */}
       <nav className="flex-1 px-2.5 py-4 space-y-1 overflow-y-auto" role="navigation">
-        {navItems.map((item) => {
-          const isActive = pathname.startsWith(item.href);
-          return (
-            <a
-              key={item.href}
-              href={item.href}
-              title={isSidebarCollapsed ? item.label : undefined}
-              className={cn(
-                'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-fast',
-                isActive
-                  ? 'bg-primary/10 text-primary-600 dark:text-primary-400 font-semibold'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-surface-muted',
-                isSidebarCollapsed && 'justify-center px-0'
-              )}
-            >
-              {item.icon}
-              {!isSidebarCollapsed && (
-                <span className="truncate flex-1">{item.label}</span>
-              )}
-              {!isSidebarCollapsed && item.badge && (
-                <span className="px-1.5 py-0.5 text-[11px] font-bold rounded-full bg-primary/20 text-primary-700 dark:text-primary-300">
-                  {item.badge}
-                </span>
-              )}
-            </a>
-          );
-        })}
+        {navItems.map(renderItem)}
 
-        {/* L2 Projects Section */}
-        {!isSidebarCollapsed && (
-          <div className="pt-6 pb-2">
-            <div className="px-3 text-[11px] font-bold uppercase tracking-wider text-text-muted mb-2 flex items-center justify-between">
-              <span>Проекты</span>
-              <a
-                href="/projects"
-                className="hover:text-text-primary transition-colors text-xs font-bold"
-                title="Управление проектами"
+        {/* Less frequent sections */}
+        <div className="pt-4">
+          {!isSidebarCollapsed && (
+            <button
+              type="button"
+              onClick={() => setMoreOpen((v) => !v)}
+              aria-expanded={showMore}
+              className="w-full flex items-center justify-between px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+            >
+              <span>Ещё</span>
+              <svg
+                className={cn('w-3.5 h-3.5 transition-transform duration-fast', showMore && 'rotate-180')}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                aria-hidden="true"
               >
-                +
-              </a>
-            </div>
-            <div className="space-y-0.5">
-              {dbProjects.length > 0 ? (
-                dbProjects.map((proj) => (
-                  <a
-                    key={proj.id}
-                    href={`/projects?id=${proj.id}`}
-                    className="flex items-center gap-2.5 px-3 py-1.5 rounded-md text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-surface-muted transition-colors"
-                  >
-                    <span
-                      className="w-2 h-2 rounded-full shrink-0"
-                      style={{ backgroundColor: proj.color || '#6366f1' }}
-                    />
-                    <span className="truncate flex-1">{proj.name}</span>
-                    {proj.github_repo && (
-                      <span className="text-[9px] px-1 py-0.2 rounded bg-surface-muted text-text-muted font-mono">
-                        git
-                      </span>
-                    )}
-                  </a>
-                ))
-              ) : (
-                <a
-                  href="/projects"
-                  className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary block transition-colors italic"
-                >
-                  + Добавить проект
-                </a>
-              )}
-            </div>
-          </div>
-        )}
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+          )}
+          {showMore && <div className="space-y-1 mt-1">{moreItems.map(renderItem)}</div>}
+        </div>
       </nav>
 
       {/* Footer / Toggle & Settings */}

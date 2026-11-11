@@ -39,13 +39,13 @@ export function PlanPreviewSheet({ plan, onClose }: { plan: AIPlan; onClose: () 
   const titleOf = (id?: string) => tasks.data?.find((t) => t.id === id)?.title;
 
   return (
-    <Sheet label="AI-план дня" onClose={onClose}>
+    <Sheet label="План дня" onClose={onClose}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--link)' }}>
         <IconSpark size={20} />
         <h2 className="sheet-title" style={{ color: 'var(--text)' }}>План на день</h2>
       </div>
       <div className="small muted" style={{ lineHeight: 1.4 }}>
-        {plan.ai_explanation || 'AI предлагает изменения.'} Ничего не сохранится, пока вы не нажмёте «Применить».
+        {plan.ai_explanation || 'Предлагаю изменения.'} Ничего не сохранится, пока вы не нажмёте «Применить».
       </div>
       {plan.changes.map((c, i) => {
         const d = describeChange(c, titleOf);

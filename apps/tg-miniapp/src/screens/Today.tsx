@@ -64,8 +64,8 @@ export function TodayScreen({ name, onOpenTask, onPlan, onAllTasks }: Props) {
   const planDay = () => {
     haptic.tap();
     createPlan.mutate(undefined, {
-      onSuccess: (plan) => (plan.changes.length ? onPlan(plan) : toast('AI не нашёл, что улучшить в расписании')),
-      onError: (e) => toast(e instanceof Error ? e.message : 'AI недоступен', 'error'),
+      onSuccess: (plan) => (plan.changes.length ? onPlan(plan) : toast('Не нашёл, что улучшить в расписании')),
+      onError: (e) => toast(e instanceof Error ? e.message : 'Не получилось составить план', 'error'),
     });
   };
 
@@ -98,7 +98,7 @@ export function TodayScreen({ name, onOpenTask, onPlan, onAllTasks }: Props) {
           <div key={r} className="small muted">• {r}</div>
         ))}
         <button type="button" className="btn small" style={{ alignSelf: 'flex-start' }} onClick={planDay} disabled={createPlan.isPending}>
-          {createPlan.isPending ? 'AI думает…' : 'Спланировать день с AI'}
+          {createPlan.isPending ? 'Планирую…' : 'Разложить задачи по свободным окнам'}
         </button>
       </section>
 
