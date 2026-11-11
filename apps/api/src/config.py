@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     )
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60 * 24  # 24 hours
+    # New accounts (email sign-up and first Google sign-in). A self-hosted single-user
+    # install turns this off; the very first account can always be created.
+    allow_registration: bool = True
 
     # AI Providers
     openai_api_key: str = Field(default="", description="OpenAI API key")

@@ -25,6 +25,11 @@ from src.shared.deps import get_current_user, get_public_session
 router = APIRouter(tags=["identity"])
 
 
+@router.get("/auth/config", summary="Public sign-in options for the login page")
+async def auth_config(session: AsyncSession = Depends(get_public_session)) -> dict:
+    return {"registration_enabled": await identity_service.registration_open(session)}
+
+
 @router.post(
     "/auth/register",
     response_model=UserResponse,

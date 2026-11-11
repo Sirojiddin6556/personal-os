@@ -17,7 +17,7 @@ from src.domains.identity.schemas import (
     UserRegisterRequest,
     WorkspaceCreateRequest,
 )
-from src.shared.exceptions import ConflictError, NotFoundError, UnauthorizedError
+from src.shared.exceptions import ConflictError, ForbiddenError, NotFoundError, UnauthorizedError
 from src.shared.outbox import publish_event
 
 
@@ -57,7 +57,16 @@ def create_access_token(user_id: UUID, expires_delta: Optional[timedelta] = None
 class IdentityService:
     """Business logic for User authentication, registration, and Workspace tenancy."""
 
+    async def registration_open(self, session: AsyncSession) -> bool:
+        """Sign-up allowed: enabled in settings, or no account exists yet (first-run bootstrap)."""
+        if settings.allow_registration:
+            return True
+        res = await session.execute(select(User.id).limit(1))
+        return res.first() is None
+
     async def register(self, session: AsyncSession, data: UserRegisterRequest) -> User:
+        if not await self.registration_open(session):
+            raise ForbiddenError("Регистрация новых аккаунтов отключена на этом сервере.")
         # Check if email already exists
         stmt = select(User).where(User.email == data.email)
         res = await session.execute(stmt)

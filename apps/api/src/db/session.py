@@ -38,6 +38,31 @@ async_session_factory = async_sessionmaker(
     autocommit=False,
 )
 
+# Workspace-scoped requests connect as a role WITHOUT superuser/BYPASSRLS
+# (src/db/app_role.py), so the tenant_isolation RLS policies are enforced there.
+# Not set (dev/tests): same engine as everything else.
+TENANT_DATABASE_URL: str = os.getenv("TENANT_DATABASE_URL", "").strip()
+
+tenant_engine: AsyncEngine = (
+    create_async_engine(
+        normalize_database_url(TENANT_DATABASE_URL),
+        echo=os.getenv("DB_ECHO", "False").lower() in ("true", "1", "yes"),
+        pool_size=int(os.getenv("DB_POOL_SIZE", "20")),
+        max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "10")),
+        pool_pre_ping=True,
+    )
+    if TENANT_DATABASE_URL
+    else engine
+)
+
+tenant_session_factory = async_sessionmaker(
+    bind=tenant_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autoflush=False,
+    autocommit=False,
+)
+
 
 async def set_tenant_context(session: AsyncSession, workspace_id: uuid.UUID | str) -> None:
     """Set the PostgreSQL session variable for Row Level Security (RLS) tenant isolation.
@@ -72,7 +97,7 @@ def _apply_tenant_context(session: Session, transaction, connection) -> None:
 
 async def get_session(workspace_id: uuid.UUID) -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency yielding an AsyncSession with tenant RLS context pre-configured."""
-    async with async_session_factory() as session:
+    async with tenant_session_factory() as session:
         try:
             # Picked up by _apply_tenant_context for this and every later transaction.
             session.sync_session.info[TENANT_INFO_KEY] = str(uuid.UUID(str(workspace_id)))

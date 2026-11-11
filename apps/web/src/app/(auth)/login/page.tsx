@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiRequest, ApiError, ValidationError } from '@/lib/api-client';
 import { GoogleSignInButton, GOOGLE_CLIENT_ID } from '@/components/auth/GoogleSignInButton';
@@ -22,6 +22,14 @@ export default function LoginPage() {
   const [generalError, setGeneralError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isOAuthLoading, setIsOAuthLoading] = useState(false);
+  // Server may close sign-up (single-user self-hosting); hide the toggle then.
+  const [registrationEnabled, setRegistrationEnabled] = useState(false);
+
+  useEffect(() => {
+    apiRequest<{ registration_enabled: boolean }>('GET', '/auth/config')
+      .then((cfg) => setRegistrationEnabled(Boolean(cfg?.registration_enabled)))
+      .catch(() => setRegistrationEnabled(false));
+  }, []);
 
   const handleLoginSuccess = (token: string) => {
     // 1. Store in localStorage
@@ -84,6 +92,8 @@ export default function LoginPage() {
           setGeneralError('Неверный email или пароль. Попробуйте еще раз.');
         } else if (err.status === 409) {
           setGeneralError('Аккаунт с таким email уже есть. Войдите в него.');
+        } else if (err.status === 429) {
+          setGeneralError('Слишком много попыток входа. Подождите минуту и попробуйте снова.');
         } else {
           setGeneralError(err.problem.detail || err.problem.title || `Ошибка входа (${err.status})`);
         }
@@ -298,6 +308,7 @@ export default function LoginPage() {
           )}
         </form>
 
+        {(registrationEnabled || mode === 'register') && (
         <div className="text-center text-xs text-text-muted">
           {mode === 'login' ? 'Нет аккаунта?' : 'Уже есть аккаунт?'}{' '}
           <button
@@ -312,6 +323,7 @@ export default function LoginPage() {
             {mode === 'login' ? 'Зарегистрироваться' : 'Войти'}
           </button>
         </div>
+        )}
 
         {/* Development / Demo Quick Access (never in production builds) */}
         {isDevBuild && (
