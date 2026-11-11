@@ -65,8 +65,17 @@ class IdentityService:
         return res.first() is None
 
     async def register(self, session: AsyncSession, data: UserRegisterRequest) -> User:
-        if not await self.registration_open(session):
-            raise ForbiddenError("Регистрация новых аккаунтов отключена на этом сервере.")
+        from src.domains.identity import invites
+
+        invite = None
+        if data.invite_code:
+            invite = await invites.find(session, data.invite_code, lock=True)
+        if invite is None and not await self.registration_open(session):
+            raise ForbiddenError(
+                "Приглашение недействительно: оно уже использовано, отозвано или истекло."
+                if data.invite_code
+                else "Регистрация новых аккаунтов отключена на этом сервере."
+            )
         # Check if email already exists
         stmt = select(User).where(User.email == data.email)
         res = await session.execute(stmt)
@@ -122,6 +131,8 @@ class IdentityService:
             workspace_id=workspace.id,
             data={"email": user.email, "full_name": user.full_name},
         )
+        if invite is not None:
+            invite.used_at, invite.used_by = datetime.now(timezone.utc), user.id
         await session.commit()
         return user
 

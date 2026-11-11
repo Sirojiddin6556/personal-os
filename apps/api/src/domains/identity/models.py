@@ -1,9 +1,10 @@
 """SQLAlchemy models for Identity, Multi-Tenancy and Access Management."""
 
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from sqlalchemy import Boolean, ForeignKey, String, Text
+from sqlalchemy import TIMESTAMP, Boolean, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -89,3 +90,25 @@ class Membership(Base, UUIDMixin, TimestampMixin):
     # Relationships
     workspace: Mapped["Workspace"] = relationship("Workspace", back_populates="memberships")
     user: Mapped["User"] = relationship("User", back_populates="memberships")
+
+
+class Invite(Base, UUIDMixin, TimestampMixin):
+    """One-time sign-up link: lets one person register while sign-up is closed.
+
+    Only the hash of the code is stored. Not workspace-scoped (the invited person gets
+    their own new workspace), so no RLS: it is managed by the instance owner.
+    """
+
+    __tablename__ = "invites"
+
+    code_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    created_by: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False)
+    used_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    used_by: Mapped[Optional[UUID]] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
