@@ -11,9 +11,10 @@ COPY src/ ./src/
 COPY docker-entrypoint.sh ./
 # Attachments are written to /app/data/uploads (relative to WORKDIR): it must be
 # writable by the non-root user. Mount a volume at /app/data to keep the files.
+# /app/models: speech model for voice messages (own volume, kept out of the /app/data backups).
 RUN chmod +x docker-entrypoint.sh \
-    && mkdir -p /app/data/uploads \
-    && chown -R nonroot:nonroot /app/data
+    && mkdir -p /app/data/uploads /app/models \
+    && chown -R nonroot:nonroot /app/data /app/models
 VOLUME ["/app/data"]
 USER nonroot
 EXPOSE 8000

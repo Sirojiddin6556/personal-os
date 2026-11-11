@@ -1,5 +1,6 @@
 """FastAPI application factory, lifecycle events, middlewares and router registrations."""
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator, Dict
@@ -96,6 +97,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await daily_loop.start()
     except Exception as ex:
         logger.warning("Failed to start daily loop: %s", ex)
+
+    # 4d. Voice messages: fetch the speech model in the background (once; kept in a volume)
+    if settings.voice_enabled and settings.environment == "production":
+        from src.integrations.telegram.voice import warm_up
+
+        app.state.voice_warm_up = asyncio.create_task(warm_up())
 
     # 4b. Bank notices read from users' own Telegram accounts (opt-in)
     try:

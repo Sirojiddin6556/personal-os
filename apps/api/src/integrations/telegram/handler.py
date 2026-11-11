@@ -410,6 +410,44 @@ async def handle_telegram_update(
             _current_bot_token.reset(reset)
 
 
+async def _voice_to_text(chat_id: Any, media: Dict[str, Any]) -> str:
+    """Recognized text of a voice message ('' when nothing to do; the user is told why)."""
+    from src.integrations.telegram import voice
+
+    if not settings.voice_enabled:
+        await send_message(chat_id, "Голосовые выключены на этом сервере — напишите текстом.")
+        return ""
+    try:
+        voice.check_media(media)
+    except voice.VoiceError as ex:
+        await send_message(chat_id, str(ex))
+        return ""
+    status = await send_message(chat_id, "🎙 Распознаю голосовое…")
+    status_id = (status.get("result") or {}).get("message_id")
+
+    async def say(reply: str) -> None:
+        if status_id:
+            await edit_message(chat_id, status_id, reply)
+        else:
+            await send_message(chat_id, reply)
+
+    try:
+        audio = await voice.download(str(media.get("file_id") or ""), _resolve_token(None))
+        text = await voice.engine.transcribe(audio)
+    except voice.VoiceError as ex:
+        await say(str(ex))
+        return ""
+    except Exception as ex:
+        logger.exception("Voice recognition failed: %s", ex)
+        await say("Не получилось распознать голосовое. Попробуйте ещё раз или напишите текстом.")
+        return ""
+    if not text:
+        await say("🎙 Ничего не расслышал — запишите ещё раз, поближе к микрофону.")
+        return ""
+    await say(f"🎙 «{text}»")
+    return voice.normalize(text)
+
+
 async def _handle_update(
     update: Dict[str, Any],
     session: Optional[AsyncSession],
@@ -427,7 +465,10 @@ async def _handle_update(
     text = (message.get("text") or "").strip()
     chat_id = (message.get("chat") or {}).get("id")
     from_id = (message.get("from") or {}).get("id")
-    if not chat_id or not text:
+    from src.integrations.telegram import voice
+
+    media = voice.media_of(message) if not text and "edited_message" not in update else None
+    if not chat_id or (not text and media is None):
         return
 
     # 3. "/start CODE" or a bare one-time pairing code
@@ -452,6 +493,13 @@ async def _handle_update(
     if not workspace_id:
         await send_message(chat_id, NOT_LINKED_TEXT)
         return
+
+    # 3b. Voice message: recognize on this server, then handle the text like a typed one
+    if media is not None:
+        text = await _voice_to_text(chat_id, media)
+        if not text:
+            return
+        message = {**message, "text": text}
 
     # 4. Bank notification forwarded from @HumoCardBot / @CardXabarBot
     provider = provider_from_forward(message) if "edited_message" not in update else None
@@ -506,6 +554,7 @@ async def _handle_update(
                     "• Пересылайте сюда уведомления @HumoCardBot и @CardXabarBot — запишу сам\n\n"
                     "⏰ Напоминания:\n• Напомни выпить витамины\n\n"
                     "📊 Лимит трат на месяц: «лимит 5 млн», посмотреть — «лимит»\n\n"
+                    "🎙 Всё это можно надиктовать голосовым — распознаю здесь же, на сервере.\n\n"
                     "📥 Любой другой текст сохраню во «Входящие» — разберёте одной кнопкой.\n"
                     "☀️ В 08:00 пришлю план дня, 🌙 в 21:00 — итоги.\n\n"
                     "Всё остальное — в приложении: кнопка «Открыть» внизу.",

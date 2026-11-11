@@ -67,6 +67,7 @@ services:
       QUICK_TUNNEL_METRICS_URL: ${QUICK_TUNNEL_METRICS_URL:-http://tunnel:2000/quicktunnel}
     volumes:
       - uploads:/app/data
+      - models:/app/models  # speech model for voice messages (~0.5 GB, downloaded once)
     depends_on:
       db:
         condition: service_healthy
@@ -119,6 +120,7 @@ volumes:
   pgdata:
   redisdata:
   uploads:
+  models:
 
 networks:
   # Project-scoped (<project>_internal): a second copy of the stack (e.g. a
