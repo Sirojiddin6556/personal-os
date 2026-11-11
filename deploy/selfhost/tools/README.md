@@ -40,3 +40,12 @@ calls are mocked:
 ```bash
 docker compose -p pos-e2e exec -T -w /app api python - http://127.0.0.1:8000/v1 < tools/bank_e2e.py
 ```
+
+# daily_e2e.py
+
+Daily Telegram loop (Telegram mocked): unknown text -> inbox buttons -> task, expense,
+08:00 / 21:00 digests sent once, "move to tomorrow", event reminder 15 minutes ahead:
+
+```bash
+docker compose -p pos-e2e exec -T -w /app api python - http://127.0.0.1:8000/v1 < tools/daily_e2e.py
+```

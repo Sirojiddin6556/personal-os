@@ -490,6 +490,8 @@ async def _handle_update(
                     "💳 Расходы:\n• 45000 такси\n• Потратил 120 тыс на обед\n"
                     "• Пересылайте сюда уведомления @HumoCardBot и @CardXabarBot — запишу сам\n\n"
                     "⏰ Напоминания:\n• Напомни выпить витамины\n\n"
+                    "📥 Любой другой текст сохраню во «Входящие» — разберёте одной кнопкой.\n"
+                    "☀️ В 08:00 пришлю план дня, 🌙 в 21:00 — итоги.\n\n"
                     "Всё остальное — в приложении: кнопка «Открыть» внизу.",
                 )
 
@@ -519,15 +521,21 @@ async def _handle_update(
                 await send_message(chat_id, f"⏰ Напомню {local:%d.%m в %H:%M}: {reminder.title}")
 
             case _:
-                await send_message(chat_id, "Не понял. Попробуйте: «Задача: …», «45000 такси» или «Напомни …».")
+                pass  # kept in the inbox below; the user sorts it with one tap
 
         entity_type: Optional[str] = None
         entity_id: Optional[UUID] = None
-        item_status = "pending"
+        item_status = "pending"  # only messages nobody understood stay pending
         if task is not None:
             entity_type, entity_id, item_status = "task", task.id, "processed"
         elif reminder is not None:
             entity_type, entity_id, item_status = "reminder", reminder.id, "processed"
+        elif intent.type == "CREATE_EXPENSE":
+            entity_type, entity_id, item_status = "transaction", tx.id, "processed"
+        elif intent.type == "GREETING" or text.startswith("/"):
+            item_status = "discarded"  # "processed" requires a linked entity (DB check)
+            if intent.type != "GREETING":
+                await send_message(chat_id, "Такой команды нет. Напишите «помощь» — покажу, что я умею.")
 
         inbox_item = InboxItem(
             id=uuid4(),
@@ -549,6 +557,15 @@ async def _handle_update(
             data={"source": "telegram", "intent": intent.type},
         )
         await s.commit()
+
+        if item_status == "pending":
+            from src.integrations.telegram.daily import capture_keyboard
+
+            await send_message(
+                chat_id,
+                "📥 Сохранил во «Входящие». Что это?",
+                reply_markup=capture_keyboard(inbox_item.id),
+            )
 
     if session is not None:
         await _dispatch(session)
@@ -597,6 +614,27 @@ async def _handle_callback(
         except Exception as ex:
             logger.exception("Bank notice callback failed: %s", ex)
             await send_message(chat_id, "Не получилось. Попробуйте ещё раз или запишите операцию в приложении.")
+        return
+
+    if data.startswith(("in:", "dg:")):
+        if not workspace_id:
+            workspace_id = await get_workspace_by_telegram_chat(chat_id, session=session, integration_id=integration_id)
+        if not workspace_id:
+            await send_message(chat_id, NOT_LINKED_TEXT)
+            return
+        from src.integrations.telegram import daily
+
+        ws_id = workspace_id
+        fn = daily.handle_inbox_callback if data.startswith("in:") else daily.handle_digest_callback
+        try:
+            if session is not None:
+                await fn(session, ws_id, chat_id, cb_message.get("message_id"), data)
+            else:
+                async with _tenant_session(ws_id) as s:
+                    await fn(s, ws_id, chat_id, cb_message.get("message_id"), data)
+        except Exception as ex:
+            logger.exception("Inbox/digest callback failed: %s", ex)
+            await send_message(chat_id, "Не получилось. Попробуйте ещё раз.")
         return
 
     if data.startswith("txu:"):

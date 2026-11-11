@@ -90,6 +90,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as ex:
         logger.warning("Failed to start calendar auto-sync: %s", ex)
 
+    # 4c. Morning/evening digests and calendar event reminders in Telegram
+    try:
+        from src.integrations.telegram.daily import daily_loop
+        await daily_loop.start()
+    except Exception as ex:
+        logger.warning("Failed to start daily loop: %s", ex)
+
     # 4b. Bank notices read from users' own Telegram accounts (opt-in)
     try:
         from src.integrations.telegram.bank_listener import bank_listener_manager
@@ -115,6 +122,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await bank_listener_manager.stop()
         from src.integrations.google_calendar.scheduler import calendar_sync_scheduler
         await calendar_sync_scheduler.stop()
+        from src.integrations.telegram.daily import daily_loop
+        await daily_loop.stop()
         from src.integrations.telegram.public_url import public_url_watcher
         if public_url_watcher is not None:
             await public_url_watcher.stop()
