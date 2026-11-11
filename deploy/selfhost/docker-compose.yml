@@ -53,6 +53,8 @@ services:
       TENANT_DATABASE_URL: postgresql+asyncpg://personal_os_app:${APP_DB_PASSWORD}@db:5432/personal_os
       # Single-user install: no new accounts (the first one can always be created).
       ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-false}
+      # Stay signed in for 7 days (matches the web cookie); the default is 24 hours.
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-10080}
       # /api/docs and /api/openapi.json are public otherwise
       API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
