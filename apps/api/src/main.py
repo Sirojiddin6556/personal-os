@@ -83,6 +83,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as ex:
         logger.warning("Failed to start public URL watcher: %s", ex)
 
+    # 4a. Pull Google Calendar changes periodically (push channels need a stable URL)
+    try:
+        from src.integrations.google_calendar.scheduler import calendar_sync_scheduler
+        await calendar_sync_scheduler.start()
+    except Exception as ex:
+        logger.warning("Failed to start calendar auto-sync: %s", ex)
+
     # 4b. Bank notices read from users' own Telegram accounts (opt-in)
     try:
         from src.integrations.telegram.bank_listener import bank_listener_manager
@@ -106,6 +113,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await reminder_dispatcher.stop()
         from src.integrations.telegram.bank_listener import bank_listener_manager
         await bank_listener_manager.stop()
+        from src.integrations.google_calendar.scheduler import calendar_sync_scheduler
+        await calendar_sync_scheduler.stop()
         from src.integrations.telegram.public_url import public_url_watcher
         if public_url_watcher is not None:
             await public_url_watcher.stop()
@@ -135,6 +144,9 @@ def create_app() -> FastAPI:
         version=settings.app_version,
         description="Modular monolith REST and WebSocket API for Personal OS",
         lifespan=lifespan,
+        docs_url="/docs" if settings.api_docs_enabled else None,
+        redoc_url="/redoc" if settings.api_docs_enabled else None,
+        openapi_url="/openapi.json" if settings.api_docs_enabled else None,
     )
 
     # 1. CORS Middleware

@@ -115,6 +115,12 @@ class Settings(BaseSettings):
     # follows the changing *.trycloudflare.com URL and re-points the bots automatically.
     quick_tunnel_metrics_url: str = ""
 
+    # Google Calendar pull for connected workspaces (seconds, 0 = off)
+    calendar_sync_interval_seconds: float = 900.0
+
+    # Interactive API docs (/docs, /redoc, /openapi.json); off on public self-hosted installs
+    api_docs_enabled: bool = True
+
     # Telegram reminder delivery loop
     reminder_poll_interval_seconds: float = 60.0
 

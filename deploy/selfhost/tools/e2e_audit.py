@@ -262,7 +262,7 @@ A.req("DELETE", f"/projects/{pid}", (204,))
 # ---------------- gateway (static + proxy)
 if GW:
     g = httpx.Client(base_url=GW, timeout=20)
-    for path, exp in [("/", 200), ("/today/", 200), ("/notes/", 200), ("/tg/", 200), ("/api/v1/health", 200), ("/api/docs", 200), ("/nope-xyz/", 404)]:
+    for path, exp in [("/", 200), ("/today/", 200), ("/notes/", 200), ("/tg/", 200), ("/api/v1/health", 200), ("/api/docs", 404), ("/nope-xyz/", 404)]:
         r = g.get(path)
         rec(r.status_code == exp, f"[gw] GET {path}", r)
 
