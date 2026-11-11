@@ -4,7 +4,8 @@ RUN groupadd -r nonroot && useradd -r -g nonroot nonroot
 COPY pyproject.toml uv.lock ./
 RUN pip install --no-cache-dir uv && uv sync --frozen --no-dev
 ENV PATH="/app/.venv/bin:$PATH" \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    HF_HOME=/app/models/.hf
 COPY alembic.ini ./
 COPY alembic/ ./alembic/
 COPY src/ ./src/
