@@ -89,6 +89,8 @@ async def test_event_reminder_dedupe_memory_fallback(monkeypatch):
     monkeypatch.setattr(daily.settings, "redis_url", "redis://127.0.0.1:1/0")  # unreachable -> memory
     assert await seen.first_time("ev1") is True
     assert await seen.first_time("ev1") is False
+    await seen.forget("ev1")  # the send failed: the next tick must try again
+    assert await seen.first_time("ev1") is True
 
 
 async def test_slash_commands_are_not_captured_into_inbox():

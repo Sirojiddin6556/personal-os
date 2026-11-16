@@ -35,6 +35,13 @@ BANK_BOTS: Dict[str, Tuple[str, Optional[int]]] = {
     "uzcard": ("CardXabarBot", 915326936),
 }
 POLL_SECONDS = 60.0
+MAX_ATTEMPTS = 5  # a notice that keeps failing is skipped after this many polls (and reported)
+# Telethon errors meaning the account session is gone for good: reconnecting will not help.
+SESSION_GONE = {
+    "AuthKeyUnregisteredError", "SessionRevokedError", "SessionExpiredError",
+    "UserDeactivatedError", "UserDeactivatedBanError", "AuthKeyDuplicatedError",
+}
+SESSION_GONE_TEXT = "Сеанс завершён в Telegram (Настройки → Устройства). Подключите аккаунт заново."
 SUPERVISE_SECONDS = 30.0
 
 
@@ -104,6 +111,8 @@ class WorkspaceListener:
         self.workspace_id = workspace_id
         self.last_ids: Dict[str, int] = {}
         self.lock = asyncio.Lock()
+        self.attempts: Dict[Tuple[str, int], int] = {}
+        self.reported = False
 
     async def run(self) -> None:
         from telethon import events
@@ -121,7 +130,7 @@ class WorkspaceListener:
                 await _save_cfg(
                     self.integration_id,
                     _status="error",
-                    _error="Сеанс завершён в Telegram (Настройки → Устройства). Подключите аккаунт заново.",
+                    _error=SESSION_GONE_TEXT,
                 )
                 return
 
@@ -168,6 +177,11 @@ class WorkspaceListener:
                     try:
                         fresh = await client.get_messages(entity, min_id=self.last_ids.get(provider, 0), limit=100)
                     except Exception as ex:
+                        if type(ex).__name__ in SESSION_GONE:
+                            # Stays "connected" otherwise: one warning a minute and the digest would not know.
+                            logger.warning("Bank listener session is gone (%s)", type(ex).__name__)
+                            await _save_cfg(self.integration_id, _status="error", _error=SESSION_GONE_TEXT)
+                            return
                         logger.warning("Bank listener poll failed (%s)", type(ex).__name__)
                         continue
                     await self.process(provider, entity.id, list(reversed(fresh)))
@@ -183,14 +197,15 @@ class WorkspaceListener:
             for msg in sorted(messages, key=lambda m: m.id):
                 if msg.id <= self.last_ids.get(provider, 0):
                     continue
-                self.last_ids[provider] = msg.id
-                changed = True
                 if not trusted(msg, bot_id):
+                    self.last_ids[provider] = msg.id
+                    changed = True
                     continue
                 token, chat_id = await _bot_context(self.workspace_id)
                 if not chat_id:
-                    logger.info("Bank notice skipped: workspace bot is not linked to a chat")
-                    continue
+                    # Keep the position: the notices are imported once the bot is linked to a chat.
+                    logger.info("Bank notice waits: workspace bot is not linked to a chat")
+                    break
                 reset = handler._current_bot_token.set(token) if token else None
                 try:
                     received = msg.date.astimezone(timezone.utc)
@@ -198,10 +213,31 @@ class WorkspaceListener:
                     async with _tenant(self.workspace_id) as s:
                         await bank_flow.ingest(s, self.workspace_id, chat_id, provider, msg.message, received, fp, quiet=True)
                 except Exception as ex:
-                    logger.exception("Bank notice from account failed: %s", ex)
+                    # The position used to advance before ingest, so a failure lost the purchase for good.
+                    # Now the same message is retried on the next polls (the fingerprint prevents doubles).
+                    key = (provider, msg.id)
+                    self.attempts[key] = self.attempts.get(key, 0) + 1
+                    if self.attempts[key] < MAX_ATTEMPTS:
+                        logger.warning("Bank notice %s/%s failed (attempt %d), will retry: %s",
+                                       provider, msg.id, self.attempts[key], ex)
+                        break
+                    logger.exception("Bank notice %s/%s skipped after %d attempts: %s", provider, msg.id,
+                                     self.attempts[key], ex)
+                    self.attempts.pop(key, None)
+                    when = msg.date.astimezone(timezone.utc).strftime("%d.%m %H:%M UTC")
+                    await _save_cfg(self.integration_id, _error=f"уведомление банка от {when} не записалось — "
+                                    "внесите операцию вручную")
+                    self.reported = True
+                else:
+                    self.attempts.pop((provider, msg.id), None)
+                    if self.reported:  # notices flow again: the digest stops showing the old failure
+                        await _save_cfg(self.integration_id, _error=None)
+                        self.reported = False
                 finally:
                     if reset is not None:
                         handler._current_bot_token.reset(reset)
+                self.last_ids[provider] = msg.id
+                changed = True
             if changed:
                 await _save_cfg(self.integration_id, last_ids=self.last_ids)
 

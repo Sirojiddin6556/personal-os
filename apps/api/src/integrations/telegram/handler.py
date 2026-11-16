@@ -435,6 +435,17 @@ async def handle_telegram_update(
     reset = _current_bot_token.set(bot_token) if bot_token else None
     try:
         await _handle_update(update, session, workspace_id, integration_id)
+    except Exception as ex:
+        # The webhook already answered 200 and the update id is deduplicated, so Telegram will not
+        # resend it: without this the message was lost and the user got no answer at all.
+        logger.exception("Telegram update %s failed: %s", update.get("update_id"), ex)
+        msg = update.get("message") or update.get("edited_message") or (update.get("callback_query") or {}).get("message") or {}
+        chat_id = (msg.get("chat") or {}).get("id")
+        if chat_id:
+            try:
+                await send_message(chat_id, "⚠️ Не получилось обработать это сообщение — попробуйте ещё раз чуть позже.")
+            except Exception:
+                logger.warning("Failure notice for update %s not delivered", update.get("update_id"))
     finally:
         if reset is not None:
             _current_bot_token.reset(reset)

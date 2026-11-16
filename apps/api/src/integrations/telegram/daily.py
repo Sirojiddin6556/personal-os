@@ -373,6 +373,15 @@ class _Seen:
             self.memory[key] = now + timedelta(seconds=ttl)
             return True
 
+    async def forget(self, key: str) -> None:
+        """Undo first_time() after a failed send, so the next tick tries again."""
+        self.memory.pop(key, None)
+        try:
+            if self.redis is not None:
+                await self.redis.delete(f"pos:evremind:{key}")
+        except Exception:
+            pass
+
 
 async def send_digest(s: AsyncSession, integ: Integration, kind: str, now_local: datetime, tz: ZoneInfo,
                       chat: str, token: Optional[str]) -> None:
@@ -494,6 +503,7 @@ async def tick(now: Optional[datetime] = None, seen: Optional[_Seen] = None) -> 
                     await send_digest(s, integ, kind, now_local, tz, chat, token)
                 except Exception as ex:
                     logger.warning("%s digest for workspace %s failed: %s", kind, ws, ex)
+                    await s.rollback()  # a failed query would otherwise poison the rest of this tick
                     continue
                 sent[kind] = now_local.date().isoformat()
                 cfg["digests_sent"] = sent
@@ -513,7 +523,8 @@ async def tick(now: Optional[datetime] = None, seen: Optional[_Seen] = None) -> 
                        Event.starts_at > now, Event.starts_at <= now + EVENT_LEAD)
             )
             for ev_id, starts, ends, title, location in res_ev.all():
-                if not await seen.first_time(f"{ev_id}:{int(starts.timestamp())}"):
+                key = f"{ev_id}:{int(starts.timestamp())}"
+                if not await seen.first_time(key):
                     continue
                 minutes = max(1, round((starts - now).total_seconds() / 60))
                 line = f"🔔 Через {minutes} мин: {title}\n🕒 {starts.astimezone(tz):%H:%M}–{ends.astimezone(tz):%H:%M}"
@@ -523,6 +534,7 @@ async def tick(now: Optional[datetime] = None, seen: Optional[_Seen] = None) -> 
                     await send_message(chat, line, bot_token=token)
                 except Exception as ex:
                     logger.warning("Event reminder %s not delivered: %s", ev_id, ex)
+                    await seen.forget(key)  # was marked as sent before the send: retry on the next tick
 
 
 class DailyLoop:

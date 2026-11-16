@@ -103,6 +103,55 @@ async def test_untrusted_message_advances_cursor_but_is_not_recorded(listener):
 async def test_no_linked_chat_means_nothing_is_recorded(listener):
     calls, _ = await run_process(listener, [msg(11)], chat=None)
     assert calls == []
+    assert listener.last_ids["humo"] == 10  # imported later, once the bot is linked
+
+
+async def run_failing(lst, messages, fail_ids):
+    calls = []
+
+    async def flaky_ingest(s, ws, chat_id, provider, text, received, fp, quiet=False):
+        calls.append(fp)
+        if fail_ids:
+            raise RuntimeError("db restarting")
+
+    class _Ctx:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *a):
+            return False
+
+    with patch.object(bank_flow, "ingest", side_effect=flaky_ingest), \
+            patch.object(bank_listener, "_bot_context", AsyncMock(return_value=("123:T", "777"))), \
+            patch.object(bank_listener, "_save_cfg", AsyncMock()) as save, \
+            patch.object(bank_listener, "_tenant", lambda ws: _Ctx()):
+        await lst.process("humo", HUMO_ID, messages)
+    return calls, save
+
+
+async def test_failed_notice_is_retried_not_lost(listener):
+    m11 = msg(11, date=datetime(2026, 10, 15, 6, 39, tzinfo=timezone.utc))
+    m12 = msg(12, date=datetime(2026, 10, 15, 6, 40, tzinfo=timezone.utc))
+    calls, _ = await run_failing(listener, [m11, m12], fail_ids=True)
+    assert len(calls) == 1  # stops at the failing one, keeps the order
+    assert listener.last_ids["humo"] == 10  # position not advanced: the next poll retries it
+    calls, _ = await run_failing(listener, [m11, m12], fail_ids=False)
+    assert len(calls) == 2
+    assert listener.last_ids["humo"] == 12
+
+
+async def test_notice_failing_every_time_is_skipped_and_reported(listener):
+    for _ in range(bank_listener.MAX_ATTEMPTS - 1):
+        await run_failing(listener, [msg(11)], fail_ids=True)
+        assert listener.last_ids["humo"] == 10
+    _, save = await run_failing(listener, [msg(11)], fail_ids=True)
+    assert listener.last_ids["humo"] == 11  # one bad message must not block the ones after it
+    errors = [c.kwargs["_error"] for c in save.await_args_list if "_error" in c.kwargs]
+    assert errors and "не записалось" in errors[0]
+    assert listener.reported
+    _, save = await run_failing(listener, [msg(12)], fail_ids=False)
+    assert any(c.kwargs.get("_error", "keep") is None for c in save.await_args_list)  # cleared once notices flow
+    assert not listener.reported
 
 
 def test_phone_and_hash_validation():
