@@ -27,8 +27,11 @@ from src.integrations.telegram.user_account import PROVIDER, dec, make_client
 
 logger = logging.getLogger("personal_os.bank_listener")
 
+# Usernames are only used to find the chat; the pinned numeric ids are what identifies the bank bot.
+# Telegram stopped returning @CardXabarBot's username on its entity (Nov 2026), so a username check alone
+# silently switched Uzcard notices off.
 BANK_BOTS: Dict[str, Tuple[str, Optional[int]]] = {
-    "humo": ("HumoCardBot", None),
+    "humo": ("HumoCardBot", 856254490),
     "uzcard": ("CardXabarBot", 915326936),
 }
 POLL_SECONDS = 60.0
@@ -47,12 +50,15 @@ def trusted(msg: Any, bot_id: int) -> bool:
 
 
 def verified_bot(entity: Any, provider: str) -> bool:
+    """The entity is the bank's bot: a bot with the pinned id (or, without a pin, the expected username)."""
     username, pinned_id = BANK_BOTS[provider]
-    return (
-        bool(getattr(entity, "bot", False))
-        and (getattr(entity, "username", "") or "").lower() == username.lower()
-        and (pinned_id is None or getattr(entity, "id", None) == pinned_id)
-    )
+    if not getattr(entity, "bot", False):
+        return False
+    if pinned_id is not None:
+        return getattr(entity, "id", None) == pinned_id
+    names = {(getattr(entity, "username", "") or "").lower()}
+    names |= {(getattr(u, "username", "") or "").lower() for u in (getattr(entity, "usernames", None) or [])}
+    return username.lower() in names
 
 
 async def _bot_context(workspace_id: UUID) -> Tuple[Optional[str], Optional[str]]:

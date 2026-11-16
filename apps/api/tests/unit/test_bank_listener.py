@@ -33,10 +33,22 @@ def test_only_messages_written_by_the_bank_bot_are_trusted():
 
 
 def test_bank_bot_identity():
-    assert verified_bot(SimpleNamespace(bot=True, username="HumoCardBot", id=1), "humo")
+    assert verified_bot(SimpleNamespace(bot=True, username="HUMOcardbot", id=856254490), "humo")
     assert verified_bot(SimpleNamespace(bot=True, username="CardXabarBot", id=915326936), "uzcard")
+    # Telegram may return the bot without its username: the pinned id is enough.
+    assert verified_bot(SimpleNamespace(bot=True, username=None, id=915326936), "uzcard")
     assert not verified_bot(SimpleNamespace(bot=True, username="CardXabarBot", id=7), "uzcard")
-    assert not verified_bot(SimpleNamespace(bot=False, username="HumoCardBot", id=1), "humo")
+    assert not verified_bot(SimpleNamespace(bot=False, username=None, id=915326936), "uzcard")
+    assert not verified_bot(SimpleNamespace(bot=True, username="HumoCardBot", id=1), "humo")
+
+
+def test_unpinned_bot_matches_username_or_collectible_usernames(monkeypatch):
+    from src.integrations.telegram import bank_listener
+
+    monkeypatch.setitem(bank_listener.BANK_BOTS, "humo", ("HumoCardBot", None))
+    assert verified_bot(SimpleNamespace(bot=True, username="humocardbot", id=1), "humo")
+    alt = SimpleNamespace(bot=True, username=None, usernames=[SimpleNamespace(username="HumoCardBot")], id=1)
+    assert verified_bot(alt, "humo")
     assert not verified_bot(SimpleNamespace(bot=True, username="HumoCardBot2", id=1), "humo")
 
 
