@@ -88,6 +88,7 @@ class DayData:
     limit: Optional[limits.LimitStatus] = None
     p2p_unsorted: int = 0
     p2p_unsorted_minor: int = 0
+    problems: List[str] = field(default_factory=list)
 
 
 def _day_bounds(d: date, tz: ZoneInfo) -> Tuple[datetime, datetime]:
@@ -198,6 +199,8 @@ def limit_alert_text(lim: limits.LimitStatus, threshold: int) -> str:
 
 def morning_text(d: date, data: DayData, tz: ZoneInfo) -> str:
     out = [f"☀️ Доброе утро! {day_title(d)}", ""]
+    if data.problems:
+        out += ["⚠️ Требует внимания:"] + data.problems + [""]
     out.append("📅 Сегодня:" if data.events else "📅 Событий в календаре нет")
     out += _clip([_event_line(e, tz) for e in data.events])
     out.append("")
@@ -385,6 +388,12 @@ async def send_digest(s: AsyncSession, integ: Integration, kind: str, now_local:
         return
     if kind == "morning":
         data = await collect(s, ws, today, tz, spending_day=today - timedelta(days=1))
+        try:
+            from src.integrations import health
+
+            data.problems = await health.problems(s, ws, datetime.now(timezone.utc))
+        except Exception as ex:  # the digest must go out even if the health check breaks
+            logger.warning("Integration health check failed: %s", ex)
         text, rows = morning_text(today, data, tz), [app_button()]
     else:
         data = await collect(s, ws, today, tz, spending_day=today)

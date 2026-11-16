@@ -6,6 +6,7 @@ issues close their task. One-way: nothing is written to GitHub.
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 from uuid import UUID
 
@@ -48,6 +49,7 @@ async def connected_workspaces() -> List[UUID]:
 async def sync_workspace(workspace_id: UUID, notify: bool = True) -> Tuple[int, int]:
     created: List[Tuple[str, str]] = []
     closed: List[Tuple[str, str]] = []
+    failed: List[str] = []
     async with async_session_factory() as session:
         session.sync_session.info[TENANT_INFO_KEY] = str(workspace_id)
         await set_tenant_context(session, workspace_id)
@@ -56,18 +58,36 @@ async def sync_workspace(workspace_id: UUID, notify: bool = True) -> Tuple[int, 
             select(Project).where(Project.workspace_id == workspace_id, Project.github_repo.is_not(None),
                                   Project.status != "archived")
         )).scalars().all()
-        for project in projects:
+        # Read plain values first: a rollback expires every loaded object, and touching an expired
+        # attribute in async SQLAlchemy raises, which used to abort the whole pass on the first failure.
+        targets = [(p.id, p.name, p.github_repo) for p in projects]
+        for project_id, project_name, repo in targets:
             try:
+                project = await session.get(Project, project_id)
                 result = await github_service.sync_issues(session, workspace_id, project, client)
+                titles_new = [t.title for t in result.created]
+                titles_closed = [t.title for t in result.closed]
                 await session.commit()
             except asyncio.CancelledError:
                 raise
             except Exception as ex:
                 await session.rollback()
-                logger.warning("GitHub issues sync failed for %s: %s", project.github_repo, ex)
+                logger.warning("GitHub issues sync failed for %s: %s", repo, ex)
+                failed.append(repo)
                 continue
-            created += [(project.name, t.title) for t in result.created]
-            closed += [(project.name, t.title) for t in result.closed]
+            created += [(project_name, title) for title in titles_new]
+            closed += [(project_name, title) for title in titles_closed]
+
+        # Outcome on the integration row: the morning digest lists failing repositories (src/integrations/health.py).
+        gh = (await session.execute(
+            select(Integration).where(Integration.workspace_id == workspace_id, Integration.provider == "github")
+        )).scalars().first()
+        if gh is not None:
+            if failed:
+                gh.sync_error = "не обновляются задачи из " + ", ".join(failed)
+            else:
+                gh.sync_error, gh.last_synced_at = None, datetime.now(timezone.utc)
+            await session.commit()
 
         if notify and (created or closed):
             from src.integrations.telegram.handler import send_message
